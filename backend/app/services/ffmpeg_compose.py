@@ -119,6 +119,7 @@ def _probe_has_audio(path: Path) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
         return bool((proc.stdout or "").strip())
     except Exception:  # noqa: BLE001
@@ -145,6 +146,7 @@ def probe_duration(path: Path) -> float | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
         if proc.returncode != 0:
             return None
@@ -175,6 +177,7 @@ def probe_video_dimensions(path: Path) -> tuple[int, int] | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
         if proc.returncode != 0:
             return None
@@ -203,6 +206,7 @@ def is_near_silent_audio(path: Path, *, max_db: float = -70.0) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
         text = (proc.stderr or "") + (proc.stdout or "")
         peak: float | None = None
@@ -240,7 +244,16 @@ class FfmpegInterrupted(RuntimeError):
 
 def _run(cmd: list[str]) -> None:
     logger.info("ffmpeg: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=max(1.0, float(get_settings().ffmpeg_timeout_sec)),
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.error("ffmpeg timed out after %ss", get_settings().ffmpeg_timeout_sec)
+        raise RuntimeError("ffmpeg 超过最大运行时间") from exc
     if proc.returncode == 0:
         return
     stderr = proc.stderr or ""
@@ -296,7 +309,7 @@ def extract_video_poster_frame(
         "2",
         str(dest),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if proc.returncode != 0 or not dest.exists() or dest.stat().st_size <= 0:
         logger.warning(
             "抽封面失败 path=%s stderr=%s",
@@ -337,7 +350,7 @@ def extract_video_last_frame(video: str | Path, dest: Path) -> bool:
         "2",
         str(dest),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if proc.returncode != 0 or not dest.exists() or dest.stat().st_size <= 0:
         logger.warning(
             "抽尾帧失败 path=%s stderr=%s",

@@ -16,6 +16,10 @@ from app.services.billing.estimates import estimate_task_fen
 
 logger = logging.getLogger(__name__)
 
+
+class TaskCancelledBeforeStart(RuntimeError):
+    """The task was cancelled while waiting for the billing row lock."""
+
 # 仍占用余额承诺、尚未预扣冻结的进行中任务
 _PENDING_BILLING_TASK_STATUSES = frozenset(
     {
@@ -175,6 +179,10 @@ async def freeze_for_task(db: AsyncSession, task: TaskRun) -> int:
     if locked_task is not task:
         task.billing_status = locked_task.billing_status
         task.billing_estimate_fen = locked_task.billing_estimate_fen
+        task.status = locked_task.status
+        task.cancel_requested = locked_task.cancel_requested
+    if task.cancel_requested or task.status == "cancel_requested":
+        raise TaskCancelledBeforeStart
     if task.billing_status == "frozen":
         return int(task.billing_estimate_fen or 0)
 

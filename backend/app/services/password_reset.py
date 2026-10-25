@@ -2,6 +2,7 @@
 """邮箱找回密码：Redis 一次性 token + SMTP 重置链接。"""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import secrets
@@ -115,21 +116,23 @@ async def request_password_reset(db: AsyncSession, email: str) -> dict[str, Any]
     发起找回：写 Redis token 并尝试发信。
     始终返回统一成功文案（防枚举）；Redis 不可用时抛错。
     """
-    redis_client = get_redis_client()
+    # redis.Redis is intentionally kept for compatibility with the existing
+    # token helpers, but all network calls run off the FastAPI event loop.
+    redis_client = await asyncio.to_thread(get_redis_client)
     email_norm = str(email or "").strip().lower()
     cd_key = _cooldown_key(email_norm)
 
     # 60 秒冷却：重复请求直接成功、不重发
-    if redis_client.get(cd_key):
+    if await asyncio.to_thread(redis_client.get, cd_key):
         return {"ok": True, "message": GENERIC_OK_MESSAGE}
 
-    redis_client.setex(cd_key, COOLDOWN_SECONDS, "1")
+    await asyncio.to_thread(redis_client.setex, cd_key, COOLDOWN_SECONDS, "1")
 
     user = await get_user_by_email(db, email_norm)
     if not user:
         return {"ok": True, "message": GENERIC_OK_MESSAGE}
 
-    token = create_reset_token(redis_client, int(user.id))
+    token = await asyncio.to_thread(create_reset_token, redis_client, int(user.id))
     link = build_reset_link(token)
     body = (
         "您正在重置万象影界 | VISTAVERSE 账号密码。\n\n"
@@ -157,8 +160,8 @@ async def apply_password_reset(
     new_password: str,
 ) -> None:
     """校验 token 后更新密码；token 一次性消费。"""
-    redis_client = get_redis_client()
-    user_id = consume_reset_token(redis_client, token)
+    redis_client = await asyncio.to_thread(get_redis_client)
+    user_id = await asyncio.to_thread(consume_reset_token, redis_client, token)
     user = await get_user_by_id(db, user_id)
     if not user:
         raise InvalidTokenError("重置链接无效或已过期")

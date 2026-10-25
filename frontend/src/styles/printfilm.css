@@ -7330,3 +7330,127 @@ button.pf-shot-editable:disabled {
     justify-content: center;
   }
 }
+
+/* UX baseline: keep compact controls usable with keyboard and touch. */
+.pf-nav-help-btn,
+.pf-nav-github {
+  min-height: 40px;
+}
+
+.pf-nav-github {
+  min-width: 40px;
+}
+
+.pf-nav-lang {
+  height: 40px;
+}
+
+.pf-nav-lang button {
+  min-width: 40px;
+}
+
+.pf-nav-burger {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.pf-btn {
+  min-height: 44px;
+}
+
+.pf-btn-sm {
+  min-height: 40px;
+}
+
+.pf-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0.4rem 0.25rem;
+}
+
+.pf-filter-trigger {
+  min-height: 44px;
+}
+
+.pf-modal-close,
+.pf-wx-fab-close,
+.pf-help-faq-chev {
+  width: 40px;
+  height: 40px;
+}
+
+@media (max-width: 700px) {
+  .pf-shell-main {
+    padding-inline: 1rem;
+  }
+
+  .pf-land-hero {
+    padding-top: 1.5rem;
+  }
+
+  .pf-land-hero h1 {
+    font-size: clamp(2rem, 10vw, 2.7rem);
+  }
+
+  .pf-land-lede {
+    font-size: 1rem;
+  }
+
+  .pf-land-cta > * {
+    flex: 1 1 13rem;
+  }
+}
+
+/* Small screens: move secondary actions into the drawer so the brand and menu
+   remain comfortably tappable without wrapping the header. */
+.pf-nav-drawer-links .pf-btn {
+  margin-top: 0.55rem;
+  justify-content: center;
+}
+
+@media (max-width: 700px) {
+  .pf-nav {
+    height: 60px;
+    padding-inline: 1rem;
+  }
+
+  .pf-nav-right {
+    gap: 0.35rem;
+  }
+
+  .pf-nav-right > .pf-nav-help-btn,
+  .pf-nav-right > .pf-nav-github,
+  .pf-nav-right > .pf-nav-login,
+  .pf-nav-right > .pf-btn {
+    display: none;
+  }
+
+  .pf-nav-lang {
+    height: 36px;
+  }
+
+  .pf-nav-lang button {
+    min-width: 36px;
+    padding-inline: 0.45rem;
+    font-size: 0.68rem;
+  }
+
+  .pf-nav-drawer {
+    padding: 0.7rem 1rem 1rem;
+  }
+
+  .pf-nav-drawer-links a,
+  .pf-nav-drawer-links .pf-btn {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-nav-github,
+  .pf-land-github,
+  .pf-land-product,
+  .pf-land-tool-card {
+    transition: none;
+  }
+}

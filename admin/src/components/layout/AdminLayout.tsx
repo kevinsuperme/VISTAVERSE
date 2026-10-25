@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -215,6 +215,16 @@ export function AdminLayout() {
    */
 
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileOpen]);
 
 
 
@@ -238,7 +248,7 @@ export function AdminLayout() {
 
   return (
 
-    <div className={cn("admin-app", collapsed && "is-collapsed")}>
+    <div className={cn("admin-app", collapsed && "is-collapsed", mobileOpen && "is-mobile-open")}>
 
       <aside className="admin-sidebar">
 
@@ -293,6 +303,7 @@ export function AdminLayout() {
                   }
 
                   title={item.label}
+                  onClick={() => setMobileOpen(false)}
 
                 >
 
@@ -326,7 +337,7 @@ export function AdminLayout() {
 
           )}
 
-          <button type="button" className="admin-icon-btn !text-[rgba(240,245,242,0.55)] hover:!text-[#e8f0eb]" onClick={handleLogout} title="退出登录">
+          <button type="button" className="admin-icon-btn !text-[rgba(240,245,242,0.55)] hover:!text-[#e8f0eb]" onClick={handleLogout} title="退出登录" aria-label="退出登录">
 
             <LogOut className="h-4 w-4" />
 
@@ -336,7 +347,14 @@ export function AdminLayout() {
 
       </aside>
 
-
+      {mobileOpen ? (
+        <button
+          type="button"
+          className="admin-mobile-scrim"
+          aria-label="关闭导航菜单"
+          onClick={() => setMobileOpen(false)}
+        />
+      ) : null}
 
       <div className="admin-main">
 
@@ -350,9 +368,17 @@ export function AdminLayout() {
 
               className="admin-icon-btn"
 
-              onClick={() => setCollapsed((v) => !v)}
+              onClick={() => {
+                if (window.matchMedia("(max-width: 900px)").matches) {
+                  setCollapsed(false);
+                  setMobileOpen((v) => !v);
+                } else {
+                  setCollapsed((v) => !v);
+                }
+              }}
 
-              aria-label="折叠侧栏"
+              aria-label={mobileOpen ? "关闭导航菜单" : collapsed ? "展开侧栏" : "折叠侧栏"}
+              aria-expanded={mobileOpen}
 
             >
 
@@ -372,7 +398,7 @@ export function AdminLayout() {
 
           <div className="flex items-center gap-1">
 
-            <button type="button" className="admin-icon-btn" title="通知">
+            <button type="button" className="admin-icon-btn" title="通知" aria-label="通知">
 
               <Bell className="h-4 w-4" />
 
@@ -385,6 +411,7 @@ export function AdminLayout() {
               className="admin-icon-btn"
 
               title="全屏"
+              aria-label="切换全屏"
 
               onClick={() => {
 

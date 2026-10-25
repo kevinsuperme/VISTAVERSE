@@ -157,3 +157,11 @@ async def test_apply_password_reset_updates_hash():
         db.commit.assert_awaited()
         with pytest.raises(pr.InvalidTokenError):
             await pr.apply_password_reset(db, token=token, new_password="again12")
+
+
+def test_password_reset_offloads_sync_redis_calls() -> None:
+    """Async request handlers must not call the blocking Redis client inline."""
+    import inspect
+
+    source = inspect.getsource(pr.request_password_reset) + inspect.getsource(pr.apply_password_reset)
+    assert "asyncio.to_thread" in source

@@ -7,8 +7,11 @@ import tailwindcss from "@tailwindcss/vite";
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Vite config: React + Tailwind, admin on 5174 with /api proxy
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
+  // Production is mounted behind the main Nginx instance at /admin/;
+  // development keeps the existing root path on port 5174.
+  base: mode === "production" ? "/admin/" : "/",
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "./src"),
@@ -27,4 +30,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

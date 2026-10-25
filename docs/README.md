@@ -9,6 +9,7 @@
 | [brand-guidelines.md](./brand-guidelines.md) | **品牌规范**：Logo、色彩、宣传语、语气和产品命名 |
 | [STANDARDS.md](./STANDARDS.md) | **全局规范**（注释、分层、前后端、Git、发布、安全） |
 | [SECURITY.md](./SECURITY.md) | 生产安全基线、媒体边界、密钥与事件排查 |
+| [CODEX.md](./CODEX.md) | 项目级 Codex 配置、专属技能、交叉审核与验证命令 |
 | [OPERATIONS.md](./OPERATIONS.md) | Compose 启动、迁移、备份、健康检查与升级回滚 |
 | [TESTING.md](./TESTING.md) | 后端/前端测试命令、CI 和验证边界 |
 | [BILLING.md](./BILLING.md) | 计费与易支付 |
@@ -21,11 +22,13 @@
 | [../deploy/README.md](../deploy/README.md) | 中间件 compose / 本地运维补充 |
 | [../README.md](../README.md) | 仓库总览与本地启动 |
 
-相关非 docs 备忘：
+相关项目级工具配置：
 
-- `.claude/工作流状态.md` — 线上地址与中间件端口
-- `.tmp/` — 本地批处理脚本与抓取文案（勿入库敏感 token）
-- `deploy/scripts/deploy_kepu.py` — 全量发布脚本（gitignore，含凭据）
+- [../.codex/config.toml](../.codex/config.toml) — 仓库级 Codex 默认值与可选文档 MCP
+- [../.agents/skills/vistaverse-operations/SKILL.md](../.agents/skills/vistaverse-operations/SKILL.md) — Docker、服务器和回滚操作规范
+- [../.agents/skills/vistaverse-review/SKILL.md](../.agents/skills/vistaverse-review/SKILL.md) — 多角色交叉审核规范
+
+本机 `.env`、`.tmp/`、`docs/releases/` 和包含凭据的发布脚本属于运行态或受保护资产，不进入开源仓库。
 
 **维护约定**：
 

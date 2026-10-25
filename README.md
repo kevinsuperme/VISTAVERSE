@@ -116,6 +116,10 @@ cp deploy/.env.docker.example deploy/.env.docker
 | `SECRET_KEY` | 任意长随机串（会话 / 密钥加密） |
 | `OPENAI_API_KEY` / `ARK_API_KEY` | TokenFree API Key（同一把填两处即可） |
 
+生产模式还必须把 `CORS_ORIGINS` 和 `PUBLIC_BASE_URL` 改成真实 HTTPS 域名；示例中的
+`your-domain.example` 只是占位值。`BILLING_ENABLED` 在生产配置中保持 `true`，演示环境请使用独立的
+development 配置，避免无计费调用上游模型。
+
 无 Key 想先看界面：把 `ARK_MOCK=true`。
 
 ### 2. 一键启动
@@ -268,6 +272,7 @@ docker-compose.full.yml   从源码构建
 | [docs/BILLING.md](docs/BILLING.md) | 计费与易支付 |
 | [docs/EPISODE_RULES.md](docs/EPISODE_RULES.md) | 漫剧分集 |
 | [docs/SEEDANCE_2_5.md](docs/SEEDANCE_2_5.md) | Seedance 参数 |
+| [docs/CODEX.md](docs/CODEX.md) | Codex 项目配置、专属技能与交叉审核 |
 | [deploy/README.md](deploy/README.md) | 本机中间件与运维 |
 
 ## 贡献

@@ -52,6 +52,8 @@ if _is_production and all(
     for origin in origins
 ):
     raise RuntimeError("生产环境必须将 CORS_ORIGINS 改为真实站点来源")
+if _is_production and any(not origin.lower().startswith("https://") for origin in origins):
+    raise RuntimeError("生产环境 CORS_ORIGINS 必须使用 HTTPS 来源")
 if _is_production and not settings.media_require_signature:
     raise RuntimeError("生产环境必须启用 MEDIA_REQUIRE_SIGNATURE=true")
 allow_credentials = bool(origins)
@@ -302,13 +304,13 @@ async def _apply_schema_patches_unlocked(conn) -> None:
     if "current_step_status" not in trcols:
         await conn.execute(text("ALTER TABLE task_runs ADD COLUMN current_step_status VARCHAR(32)"))
     if "scheduled_at" not in trcols:
-        await conn.execute(text("ALTER TABLE task_runs ADD COLUMN scheduled_at TIMESTAMP"))
+        await conn.execute(text("ALTER TABLE task_runs ADD COLUMN scheduled_at TIMESTAMPTZ"))
     if "next_action_at" not in trcols:
-        await conn.execute(text("ALTER TABLE task_runs ADD COLUMN next_action_at TIMESTAMP"))
+        await conn.execute(text("ALTER TABLE task_runs ADD COLUMN next_action_at TIMESTAMPTZ"))
     if "lease_token" not in trcols:
         await conn.execute(text("ALTER TABLE task_runs ADD COLUMN lease_token VARCHAR(64)"))
     if "lease_until" not in trcols:
-        await conn.execute(text("ALTER TABLE task_runs ADD COLUMN lease_until TIMESTAMP"))
+        await conn.execute(text("ALTER TABLE task_runs ADD COLUMN lease_until TIMESTAMPTZ"))
     if "billing_estimate_fen" not in trcols:
         await conn.execute(text("ALTER TABLE task_runs ADD COLUMN billing_estimate_fen INTEGER DEFAULT 0"))
     if "billing_charged_fen" not in trcols:

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.database import AsyncSessionLocal
 from app.services.billing.context import billing_scope
-from app.services.billing.settlement import freeze_for_task, settle_task
+from app.services.billing.settlement import TaskCancelledBeforeStart, freeze_for_task, settle_task
 from app.services.tasks.handlers import get_task_handler
 from app.services.tasks.service import append_task_event, get_task_for_runtime, set_task_step_state
 
@@ -49,6 +49,12 @@ async def execute_task_run(task_id: int) -> None:
 
         try:
             await freeze_for_task(db, task)
+        except TaskCancelledBeforeStart:
+            # freeze_for_task locks and refreshes TaskRun, which can unload the
+            # selectin-loaded steps relation. Reuse the step captured above so
+            # cancellation remains safe under async SQLAlchemy (no lazy load).
+            await _mark_cancelled(db, task, step=step)
+            return
         except ValueError as exc:
             # 余额不足：可预期失败，专用错误码便于前端引导充值
             await _fail_task_before_start(
@@ -260,7 +266,7 @@ async def _fail_task(db, task, exc: Exception) -> None:
 
 
 # 把任务收敛到取消态。
-async def _mark_cancelled(db, task) -> None:
+async def _mark_cancelled(db, task, *, step=None) -> None:
     # finalizing 收尾窗口内让位：poller 协程可能正在下载成片并落真实用量，
     # 此时全额退款会导致 usage_events 悬空、钱货两失；协程会按实结算或退回 polling。
     # 任务保持 cancel_requested，scheduler 下轮重试，窗口 TTL（10 分钟）兜底。
@@ -273,11 +279,12 @@ async def _mark_cancelled(db, task) -> None:
         )
         return
     now = datetime.now(UTC)
-    step = task.steps[0] if task.steps else None
+    step = step if step is not None else (task.steps[0] if task.steps else None)
     set_task_step_state(task, step, status="cancelled", now=now)
     task.status = "cancelled"
     task.finished_at = now
     task.next_action_at = None
+    task.lease_token = None
     task.lease_until = None
     await _sync_studio_tool_run(db, task, status="failed", error="任务已取消")
     await append_task_event(

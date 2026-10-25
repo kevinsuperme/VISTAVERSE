@@ -167,6 +167,11 @@ def _validate_remote_url(url: str) -> None:
             raise ValueError("媒体下载目标地址不允许访问内网")
 
 
+def validate_remote_reference_url(url: str) -> None:
+    """Validate a user-supplied reference URL before an upstream fetch."""
+    _validate_remote_url(url)
+
+
 def _download_timeout(timeout: float | httpx.Timeout) -> httpx.Timeout:
     """把秒数收成 httpx.Timeout：连接短、读体长，避免整包 120s 把大视频掐断。"""
     if isinstance(timeout, httpx.Timeout):

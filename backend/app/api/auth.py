@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -38,12 +39,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=TokenResponse)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     settings = get_settings()
-    existing = await get_user_by_email(db, body.email)
+    email_norm = str(body.email).strip().lower()
+    existing = await get_user_by_email(db, email_norm)
     if existing:
         raise HTTPException(status_code=400, detail="邮箱已注册")
     grant = int(settings.billing_signup_grant_fen or 0)
     user = User(
-        email=body.email.lower(),
+        email=email_norm,
         nickname=body.nickname,
         hashed_password=hash_password(body.password),
         quota_left=settings.new_user_quota,
@@ -51,7 +53,13 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) ->
         plan="free",
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        # The pre-check is advisory under concurrent registration; normalize
+        # the unique-key race into the same user-facing response.
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="邮箱已注册") from exc
     if grant > 0:
         db.add(
             WalletLedger(
@@ -149,7 +157,11 @@ async def update_me(
     user.nickname = fields["nickname"]
     user.email = fields["email"]
     user.phone = fields["phone"]
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="该邮箱已被使用") from exc
     await db.refresh(user)
     return user
 
@@ -177,11 +189,20 @@ async def upload_avatar(
         else:
             raise HTTPException(status_code=400, detail="仅支持 JPG / PNG / WebP / GIF")
 
-    raw = await file.read()
+    max_bytes = 5 * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(min(1024 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=400, detail="头像不能超过 5MB")
+    raw = b"".join(chunks)
     if not raw:
         raise HTTPException(status_code=400, detail="空文件")
-    if len(raw) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="头像不能超过 5MB")
 
     dest = storage.user_dir(user.id) / f"avatar{ext}"
     dest.write_bytes(raw)

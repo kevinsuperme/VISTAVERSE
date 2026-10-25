@@ -2,6 +2,7 @@
 """Billing wallet + epay top-up APIs."""
 from __future__ import annotations
 
+import ipaddress
 import logging
 import time
 import uuid
@@ -109,15 +110,27 @@ async def billing_preflight(
 
 
 def _client_ip(request: Request) -> str:
-    """Prefer proxy headers, fall back to direct peer address."""
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
-    real = (request.headers.get("x-real-ip") or "").strip()
-    if real:
-        return real
-    if request.client and request.client.host:
-        return request.client.host
+    """Return a client IP without trusting spoofable headers by default."""
+    peer = request.client.host if request.client and request.client.host else "127.0.0.1"
+    trusted = []
+    for raw in (get_settings().trusted_proxy_ips or "").split(","):
+        try:
+            trusted.append(ipaddress.ip_network(raw.strip(), strict=False))
+        except ValueError:
+            continue
+    try:
+        peer_ip = ipaddress.ip_address(peer)
+    except ValueError:
+        peer_ip = None
+    if peer_ip is not None and any(peer_ip in network for network in trusted):
+        forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+        real = (request.headers.get("x-real-ip") or "").strip()
+        if real:
+            return real
+    if peer:
+        return peer
     return "127.0.0.1"
 
 
@@ -355,7 +368,12 @@ async def get_order(
     user: User = Depends(get_current_user),
 ) -> dict:
     await billing.close_expired_pending_orders(db, user_id=user.id, out_trade_no=out_trade_no)
-    result = await db.execute(select(Order).where(Order.out_trade_no == out_trade_no))
+    # Serialize manual close with the payment callback. Without the row lock,
+    # a close request can read ``pending`` while a verified callback is
+    # crediting the same order, then overwrite the final ``paid`` state.
+    result = await db.execute(
+        select(Order).where(Order.out_trade_no == out_trade_no).with_for_update()
+    )
     order = result.scalar_one_or_none()
     if not order or order.user_id != user.id:
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -376,7 +394,12 @@ async def close_order(
     user: User = Depends(get_current_user),
 ) -> dict:
     """用户主动取消支付时关闭待支付订单（过期订单由系统自动关闭）。"""
-    result = await db.execute(select(Order).where(Order.out_trade_no == out_trade_no))
+    # Serialize manual close with verified payment callbacks. The callback
+    # takes the same row lock before crediting the wallet, so a close request
+    # cannot overwrite a concurrently paid order.
+    result = await db.execute(
+        select(Order).where(Order.out_trade_no == out_trade_no).with_for_update()
+    )
     order = result.scalar_one_or_none()
     if not order or order.user_id != user.id:
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -431,8 +454,12 @@ async def epay_notify(request: Request, db: AsyncSession = Depends(get_db)) -> P
     # amount check
     try:
         paid_fen = int(round(float(money) * 100))
-    except ValueError:
-        paid_fen = order.amount_fen
+    except (TypeError, ValueError, OverflowError):
+        # A valid signature does not make a malformed or missing amount safe.
+        # Fail closed so a provider payload cannot credit the order amount by
+        # omission or parsing fallback.
+        logger.error("epay amount is missing or invalid order=%s", out_trade_no)
+        return PlainTextResponse("fail", status_code=400)
     if paid_fen != int(order.amount_fen):
         logger.error(
             "epay amount mismatch order=%s expect=%s got=%s",

@@ -156,6 +156,8 @@ export default function AuthPage() {
           ? t('auth.sendReset')
           : t('auth.savePassword')
 
+  const feedbackId = error ? 'auth-error' : notice ? 'auth-notice' : undefined
+
   return (
     <div className="auth-shell">
       <div className="auth-panel">
@@ -164,21 +166,31 @@ export default function AuthPage() {
           <LanguageSwitch />
         </div>
         <h1>{title}</h1>
-        <form onSubmit={onSubmit} className="stack" noValidate>
+        <form onSubmit={onSubmit} className="stack" noValidate aria-describedby={feedbackId}>
           {mode === 'register' && (
-            <label>
+            <label htmlFor="auth-nickname">
               {t('auth.nickname')}
-              <input value={nickname} onChange={(e) => setNickname(e.target.value)} />
+              <input
+                id="auth-nickname"
+                name="nickname"
+                autoComplete="nickname"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                aria-describedby={feedbackId}
+              />
             </label>
           )}
           {(mode === 'login' || mode === 'register' || mode === 'forgot') && (
-            <label>
+            <label htmlFor="auth-email">
               {t('auth.email')}
               <input
+                id="auth-email"
+                name="email"
                 type="email"
                 inputMode="email"
                 autoComplete="username"
                 value={email}
+                aria-describedby={feedbackId}
                 onChange={(e) => {
                   setEmail(e.target.value)
                   if (error) setError('')
@@ -187,12 +199,15 @@ export default function AuthPage() {
             </label>
           )}
           {(mode === 'login' || mode === 'register' || mode === 'reset') && (
-            <label>
+            <label htmlFor="auth-password">
               {mode === 'reset' ? t('auth.newPassword') : t('auth.password')}
               <input
+                id="auth-password"
+                name="password"
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 value={password}
+                aria-describedby={feedbackId}
                 onChange={(e) => {
                   setPassword(e.target.value)
                   if (error) setError('')
@@ -201,12 +216,15 @@ export default function AuthPage() {
             </label>
           )}
           {mode === 'reset' && (
-            <label>
+            <label htmlFor="auth-confirm-password">
               {t('auth.confirmPassword')}
               <input
+                id="auth-confirm-password"
+                name="confirmPassword"
                 type="password"
                 autoComplete="new-password"
                 value={confirmPassword}
+                aria-describedby={feedbackId}
                 onChange={(e) => {
                   setConfirmPassword(e.target.value)
                   if (error) setError('')
@@ -214,9 +232,9 @@ export default function AuthPage() {
               />
             </label>
           )}
-          {notice ? <p className="auth-notice" role="status">{notice}</p> : null}
-          {error ? <p className="error" role="alert">{error}</p> : null}
-          <button className="btn primary" disabled={loading}>
+          {notice ? <p id="auth-notice" className="auth-notice" role="status" aria-live="polite">{notice}</p> : null}
+          {error ? <p id="auth-error" className="error" role="alert" aria-live="assertive">{error}</p> : null}
+          <button type="submit" className="btn primary" disabled={loading}>
             {loading ? t('auth.processing') : submitLabel}
           </button>
         </form>

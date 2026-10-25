@@ -243,21 +243,24 @@ async def user_owns_media(db, user_id: int, value: str) -> bool:
 
     from app.models import Project
 
-    predicates = [Project.id == project_id]
     try:
         from app.models_drama import DramaProject
 
-        stmt = select(Project.id).where(Project.id == project_id, Project.user_id == user_id).limit(1)
-        if (await db.execute(stmt)).scalar_one_or_none() is not None:
-            return True
-        drama_stmt = select(DramaProject.id).where(
-            DramaProject.id == project_id,
-            DramaProject.user_id == user_id,
-        ).limit(1)
-        return (await db.execute(drama_stmt)).scalar_one_or_none() is not None
+        legacy_stmt = select(Project.user_id).where(Project.id == project_id).limit(1)
+        drama_stmt = select(DramaProject.user_id).where(DramaProject.id == project_id).limit(1)
+        owners = {
+            int(owner)
+            for owner in (
+                (await db.execute(legacy_stmt)).scalar_one_or_none(),
+                (await db.execute(drama_stmt)).scalar_one_or_none(),
+            )
+            if owner is not None
+        }
+        # ``generated/p{id}`` is shared by two auto-increment tables. If the
+        # same id belongs to different users, the URL has no unambiguous
+        # namespace; fail closed instead of granting cross-user media access.
+        return len(owners) == 1 and user_id in owners
     except Exception:  # noqa: BLE001
-        # Missing optional drama tables must not turn ownership checks into an
-        # allow decision; legacy project ownership is still checked above.
-        stmt = select(Project.id).where(*predicates, Project.user_id == user_id).limit(1)
-        return (await db.execute(stmt)).scalar_one_or_none() is not None
+        # An ownership lookup failure must never turn into an allow decision.
+        return False
 

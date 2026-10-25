@@ -67,8 +67,13 @@ async def synthesize_voice_asset(
     speaker: str | None = None,
     character_name: str | None = None,
     character_asset: DramaAsset | None = None,
+    commit: bool = True,
 ) -> DramaAsset:
-    """按提示词合成音色参考音频并写回 voice 资产。"""
+    """按提示词合成音色参考音频并写回 voice 资产。
+
+    ``commit=False`` 供已进入统一计费事务的 API 调用使用，避免服务层
+    提前提交冻结/用量状态；历史内部重生成调用继续保留默认提交行为。
+    """
     settings = get_settings()
     ark = get_ark()
     prompt = (voice_prompt or "").strip()
@@ -127,7 +132,10 @@ async def synthesize_voice_asset(
         estimated=True,
         domain="drama",
     )
-    await db.commit()
-    await db.refresh(asset)
+    if commit:
+        await db.commit()
+        await db.refresh(asset)
+    else:
+        await db.flush()
     return asset
 

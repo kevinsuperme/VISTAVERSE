@@ -1,0 +1,16 @@
+# VISTAVERSE / PRINTFILM repository-scoped Codex configuration.
+# Credentials, provider selection, authentication and telemetry stay in the
+# user-level Codex configuration.
+
+[agents]
+max_concurrent_threads_per_session = 4
+default_subagent_model = "gpt-6.1-sol"
+default_subagent_reasoning_effort = "medium"
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+enabled = true
+required = false
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+default_tools_approval_mode = "prompt"

@@ -13,11 +13,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import billing as billing_api
+from app.api import auth as auth_api
+from app.api import projects as projects_api
 from app.api import tools as tools_api
+from app.api.drama import generation as drama_generation_api
 from app.api.v1 import generation as v1_generation
 from app.deps import _user_from_bearer
 from app.models import Order, User, WalletLedger
 from app.services import epay
+from app.services import storage
+from app.services import ffmpeg_compose
+from app.services import media_access
+from app.services.tasks import service as task_service
+from app.services.billing import settlement
+from app.services.tasks import executor
+from app.schemas_api import V1SeedanceTaskRequest
 
 from tests.conftest import make_task, make_user
 
@@ -89,6 +99,129 @@ async def test_epay_notify_duplicate_callback_credits_once(
 def test_epay_notify_source_locks_order_row() -> None:
     """源码守卫：回调必须用 SELECT ... FOR UPDATE 锁订单行，防并发双入账。"""
     assert "with_for_update" in inspect.getsource(billing_api.epay_notify)
+
+
+def test_close_order_source_locks_order_row() -> None:
+    """Manual cancellation must serialize with the payment callback."""
+    assert "with_for_update" in inspect.getsource(billing_api.close_order)
+
+
+def test_epay_notify_source_fails_closed_on_invalid_amount() -> None:
+    """Malformed/missing provider amounts must not fall back to order amount."""
+    source = inspect.getsource(billing_api.epay_notify)
+    assert "amount is missing or invalid" in source
+    assert "except (TypeError, ValueError, OverflowError)" in source
+
+
+def test_v1_reference_urls_are_validated_before_upstream_fetch() -> None:
+    """Public generation endpoints must not forward arbitrary internal URLs."""
+    source = inspect.getsource(v1_generation.generate_image)
+    source += inspect.getsource(v1_generation.generate_video)
+    assert "validate_remote_reference_url" in source
+    assert "status_code=422" in source
+    assert "validate_remote_reference_url" in inspect.getsource(storage)
+
+
+def test_avatar_upload_reads_in_bounded_chunks() -> None:
+    """Avatar uploads must reject oversize files while streaming reads."""
+    source = inspect.getsource(auth_api.upload_avatar)
+    assert "while True" in source
+    assert "1024 * 1024" in source
+    assert "头像不能超过 5MB" in source
+
+
+def test_project_cover_upload_reads_in_bounded_chunks() -> None:
+    source = inspect.getsource(projects_api.upload_project_cover)
+    assert "while True" in source
+    assert "1024 * 1024" in source
+    assert "封面不能超过 8MB" in source
+
+
+def test_seedance_content_is_bounded_and_media_urls_are_checked() -> None:
+    """Multimodal forwarding must cap payloads and validate every media URL."""
+    with pytest.raises(ValueError):
+        V1SeedanceTaskRequest(content=[{"type": "text", "text": "x" * 8001}])
+    source = inspect.getsource(v1_generation.forward_seedance)
+    assert "validate_remote_reference_url" in source
+    assert "max_length=20" in inspect.getsource(V1SeedanceTaskRequest)
+    normalized = V1SeedanceTaskRequest(
+        content=[{"type": "image_url", "image_url": "https://example.com/a.png"}]
+    )
+    assert normalized.content[0]["image_url"] == {"url": "https://example.com/a.png"}
+
+
+def test_ffmpeg_execution_has_a_hard_timeout() -> None:
+    """Media composition must terminate a child that exceeds its budget."""
+    source = inspect.getsource(ffmpeg_compose._run)
+    assert "TimeoutExpired" in source
+    assert "timeout=" in source
+
+
+def test_v1_upstream_errors_are_not_returned_to_clients() -> None:
+    source = inspect.getsource(v1_generation)
+    assert 'detail="上游生图服务暂时不可用"' in source
+    assert 'detail="上游生视频服务暂时不可用"' in source
+    assert "str(exc)[:400]" not in source
+
+
+def test_media_ownership_fails_closed_for_colliding_project_ids() -> None:
+    source = inspect.getsource(media_access.user_owns_media)
+    assert "len(owners) == 1" in source
+    assert "unambiguous" in source
+
+
+def test_client_ip_ignores_forwarded_headers_without_trusted_proxy() -> None:
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="198.51.100.10"),
+        headers={"x-forwarded-for": "10.0.0.9", "x-real-ip": "10.0.0.9"},
+    )
+    settings = SimpleNamespace(trusted_proxy_ips="")
+    with patch.object(billing_api, "get_settings", return_value=settings):
+        assert billing_api._client_ip(request) == "198.51.100.10"
+
+    settings.trusted_proxy_ips = "198.51.100.0/24"
+    with patch.object(billing_api, "get_settings", return_value=settings):
+        assert billing_api._client_ip(request) == "10.0.0.9"
+
+
+def test_registration_normalizes_email_and_handles_unique_race() -> None:
+    source = inspect.getsource(auth_api.register)
+    assert "email_norm = str(body.email).strip().lower()" in source
+    assert "except IntegrityError" in source
+    assert 'detail="邮箱已注册"' in source
+    update_source = inspect.getsource(auth_api.update_me)
+    assert "except IntegrityError" in update_source
+    assert 'detail="该邮箱已被使用"' in update_source
+
+
+def test_drama_voice_generation_uses_billed_task_scope() -> None:
+    source = inspect.getsource(drama_generation_api.generate_voice)
+    assert 'task_type="voice_synthesis"' in source
+    assert "run_billed_ephemeral" in source
+    assert "commit=False" in source
+    assert 'detail="音色合成服务暂时不可用"' in source
+
+
+def test_task_creation_serializes_dedupe_retries() -> None:
+    source = inspect.getsource(task_service.create_task)
+    assert "pg_advisory_xact_lock" in source
+    assert "body.client_request_id" in source
+    assert "TaskRun.domain == body.domain" in source
+    assert "TaskRun.dedupe_key == dedupe_key" in source
+    assert "return existing" in source
+
+
+def test_cancelled_tasks_are_rechecked_under_billing_lock() -> None:
+    settlement_source = inspect.getsource(settlement.freeze_for_task)
+    executor_source = inspect.getsource(executor.execute_task_run)
+    cancelled_source = inspect.getsource(executor._mark_cancelled)
+    assert "TaskCancelledBeforeStart" in settlement_source
+    assert "task.cancel_requested" in settlement_source
+    assert "except TaskCancelledBeforeStart" in executor_source
+    assert "await _mark_cancelled(db, task, step=step)" in executor_source
+    assert "task.lease_token = None" in cancelled_source
+    assert 'event_type="task.cancelled"' in cancelled_source
+    assert "await settle_task(db, task.id)" in cancelled_source
 
 
 def test_epay_verify_constant_time_signature() -> None:

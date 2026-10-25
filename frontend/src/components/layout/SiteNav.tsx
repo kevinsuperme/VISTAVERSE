@@ -70,6 +70,15 @@ export default function SiteNav({ active }: Props) {
     setMenuOpen(false)
   }, [location.pathname])
 
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [menuOpen])
+
   // 未登录去登录；已登录弹出漫剧/科普选择
   function goCreate() {
     if (!user && !localStorage.getItem('token')) {
@@ -159,12 +168,29 @@ export default function SiteNav({ active }: Props) {
         </button>
       </div>
       {menuOpen ? (
-        <div className="pf-nav-drawer" role="dialog" aria-label={t('nav.mobileNav')}>
+        <div className="pf-nav-drawer" role="dialog" aria-modal="true" aria-label={t('nav.mobileNav')}>
           <nav className="pf-nav-drawer-links">
             {centerLinks}
+            <Link to="/help">{t('nav.help')}</Link>
             <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer">
               {t('nav.github')}
             </a>
+            {user ? (
+              <Link to="/settings">{t('nav.profile')}</Link>
+            ) : (
+              <Link to="/auth?next=/">{t('nav.login')}</Link>
+            )}
+            <Button
+              variant="lime"
+              size="sm"
+              block
+              onClick={() => {
+                setMenuOpen(false)
+                goCreate()
+              }}
+            >
+              {t('nav.startCreate')}
+            </Button>
           </nav>
         </div>
       ) : null}

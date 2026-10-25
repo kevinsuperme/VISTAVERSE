@@ -8,12 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # 成片合成需要 FFmpeg；中文烧录字幕需要文泉驿字体
-RUN apt-get update \
+RUN sed -i \
+    -e 's#http://deb.debian.org/debian-security#http://mirrors.tencentyun.com/debian-security#g' \
+    -e 's#http://deb.debian.org/debian#http://mirrors.tencentyun.com/debian#g' \
+    /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 COPY app ./app
 COPY static ./static

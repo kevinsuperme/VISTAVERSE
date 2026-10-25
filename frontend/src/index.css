@@ -10,6 +10,8 @@
   --pf-radius-sm: 10px;
   --pf-shadow: 0 8px 28px rgba(17, 19, 24, 0.06);
   --pf-nav-h: 64px;
+  --pf-focus: #5b7f00;
+  --pf-focus-ring: 0 0 0 3px rgba(91, 127, 0, 0.28);
 
   /* legacy aliases used by residual styles */
   --ink: var(--pf-ink);
@@ -45,6 +47,10 @@ body,
   min-height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--pf-bg);
 }
@@ -63,4 +69,25 @@ select {
 
 button {
   cursor: pointer;
+}
+
+/* Keep keyboard navigation visible across both the auth and product shells. */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--pf-focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -21,6 +21,40 @@ PRINTFILM_VERSION=0.2.0 docker compose --env-file deploy/.env.docker up -d
 
 改源码时使用 `docker-compose.full.yml` 构建。只需要库和缓存、API 由宿主机运行时，使用 `deploy/docker-compose.yml`，并将 `REDIS_URL` 写成带密码的 URL。
 
+## Ubuntu 服务器部署（IP 测试环境）
+
+当前服务器部署目录为 `/opt/vistaverse/current`，发布版本保存在
+`/opt/vistaverse/releases/<UTC 时间戳>`；Compose 项目名固定为 `vistaverse`，使用
+`docker-compose.full.yml` 和服务器专用 `deploy/.env.docker`。PostgreSQL、Redis、API
+和两个静态站点均由 Docker 管理，数据卷为 `vistaverse_printfilm_pgdata`、
+`vistaverse_printfilm_redisdata` 和 `vistaverse_printfilm_media`。
+
+服务器只有 IP、尚未配置域名和证书，因此当前配置是隔离的 HTTP 测试环境：
+`ENVIRONMENT=development`、`ARK_MOCK=true`、`BILLING_ENABLED=false`，不可作为公网
+生产配置。正式上线前必须换成真实域名和 HTTPS，并填入真实上游密钥后改为
+`ENVIRONMENT=production`。
+
+```bash
+cd /opt/vistaverse/current
+sudo docker compose -p vistaverse --env-file deploy/.env.docker \
+  -f docker-compose.full.yml ps -a
+curl -fsS http://127.0.0.1:8000/api/health
+sudo journalctl -u vistaverse.service -n 100 --no-pager
+sudo docker compose -p vistaverse --env-file deploy/.env.docker \
+  -f docker-compose.full.yml logs --tail=200 api
+```
+
+`vistaverse.service` 已启用，负责开机执行 `docker compose up -d`；各容器也使用
+`restart: unless-stopped`。主站和管理端均可通过宿主 Nginx 的 `80` 端口访问：用户端为
+`/`，管理端为 `/admin/`。独立管理端端口 `8081` 仍转发到回环端口 `18081`，API 只绑定
+回环 `8000`。UFW 允许 `22/tcp`、`80/tcp` 和 `8081/tcp`；若云厂商安全组未放行
+`8081`，使用 `http://<服务器 IP>/admin/`，或通过 SSH 隧道访问：
+`ssh -L 8081:127.0.0.1:18081 ubuntu@<服务器 IP>`。
+
+升级前先备份数据库和媒体卷，再把 `current` 切换到新发布目录并重启服务；回滚时切回
+上一版本目录，保留数据卷，不执行 `docker compose down -v`。服务器已保留初始
+PostgreSQL 压缩备份在 `/opt/vistaverse/backups/`。
+
 ## Windows 本机 Docker 调试基线
 
 后端源码调试不要求先完成 API 镜像构建。推荐把 Postgres / Redis 放在 Docker，
@@ -50,6 +84,8 @@ REDIS_URL=redis://:<Redis密码>@127.0.0.1:16379/0
 ENVIRONMENT=production
 SECRET_KEY=<至少 32 位随机字符串>
 MEDIA_REQUIRE_SIGNATURE=true
+TRUSTED_PROXY_IPS=<反向代理网段；直连 API 留空>
+FFMPEG_TIMEOUT_SEC=1800
 ```
 
 `postgres` / `redis` 这两个服务名只在 API 也运行于 Compose 网络时有效；宿主机
@@ -57,6 +93,9 @@ API 必须使用 `127.0.0.1:15432` 和 `127.0.0.1:16379`。启动后用
 `GET /api/health` 验证迁移和连接池，再用管理员令牌访问
 `GET /api/health/details`。生产模式下 `/docs`、`/redoc` 和 `/openapi.json` 为
 404，未签名的 `/static/generated/...` 为 403。
+
+复制 `deploy/.env.docker.example` 后必须替换 `your-domain.example` 占位域名；生产 API 会拒绝全为
+localhost 的 CORS 配置。生产计费应保持 `BILLING_ENABLED=true`，关闭计费只适用于隔离演示环境。
 
 测试与调试：
 

@@ -10,6 +10,44 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _ENV_FILE = _BACKEND_DIR / ".env"
 logger = logging.getLogger(__name__)
+_DEV_EPHEMERAL_SECRET: str | None = None
+
+_EXAMPLE_SECRET_VALUES = frozenset(
+    {
+        "dev-secret-change-me",
+        "change-me",
+        "replace-me",
+        "replace-with-at-least-32-random-characters",
+    }
+)
+
+
+def _is_example_secret(value: str | None) -> bool:
+    """Return whether a configured secret is an obvious checked-in placeholder."""
+    normalized = str(value or "").strip().lower()
+    return bool(
+        normalized
+        and (
+            normalized in _EXAMPLE_SECRET_VALUES
+            or normalized.startswith("replace-with-")
+            or normalized.startswith("your-")
+        )
+    )
+
+
+def _is_example_hostname(hostname: str | None) -> bool:
+    """Reject documentation/example hosts in production URLs and CORS origins."""
+    host = str(hostname or "").strip().lower().rstrip(".")
+    return bool(
+        host
+        and (
+            host == "example.com"
+            or host.endswith(".example")
+            or ".example." in host
+            or host.startswith("your-")
+            or host.startswith("replace-with-")
+        )
+    )
 
 
 class Settings(BaseSettings):
@@ -162,6 +200,9 @@ class Settings(BaseSettings):
     public_base_url: str = "http://127.0.0.1:8000"
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+    # Hard upper bound so a malformed/very large media job cannot occupy the
+    # single task worker indefinitely. subprocess.run kills the child on timeout.
+    ffmpeg_timeout_sec: float = 1800.0
 
     tos_endpoint: str = ""
     tos_bucket: str = ""
@@ -187,6 +228,9 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5174,http://127.0.0.1:5174"
     )
+    # Only proxies in these CIDRs may supply X-Forwarded-For/X-Real-IP.
+    # Empty means client IP metadata is taken from the direct peer.
+    trusted_proxy_ips: str = ""
     # Upload/download guardrails applied before media processing.
     upload_max_file_bytes: int = 40 * 1024 * 1024
     upload_max_total_bytes: int = 160 * 1024 * 1024
@@ -213,17 +257,46 @@ class Settings(BaseSettings):
         return value
 
 
+def _validate_production_placeholders(settings: Settings) -> None:
+    """Reject checked-in placeholders from env and database-backed overlays."""
+    key = str(settings.secret_key or "").strip()
+    if not key or _is_example_secret(key) or len(key) < 32:
+        raise RuntimeError("生产环境必须设置至少 32 位随机 SECRET_KEY，不能使用示例密钥")
+    for field_name in (
+        "openai_api_key",
+        "ark_api_key",
+        "epay_key",
+        "smtp_password",
+        "tos_access_key",
+        "tos_secret_key",
+        "oss_access_key_id",
+        "oss_access_key_secret",
+    ):
+        value = str(getattr(settings, field_name, "") or "").strip()
+        if value and _is_example_secret(value):
+            raise RuntimeError(f"生产环境 {field_name.upper()} 不能使用示例密钥")
+
+    public_url = urlsplit((settings.public_base_url or "").strip())
+    if public_url.scheme != "https" or not public_url.netloc:
+        raise RuntimeError("生产环境 PUBLIC_BASE_URL 必须使用 HTTPS 公网地址")
+    if _is_example_hostname(public_url.hostname):
+        raise RuntimeError("生产环境 PUBLIC_BASE_URL 不能使用示例域名")
+    for raw_origin in (settings.cors_origins or "").split(","):
+        origin = raw_origin.strip()
+        if not origin:
+            continue
+        parsed_origin = urlsplit(origin)
+        if _is_example_hostname(parsed_origin.hostname):
+            raise RuntimeError("生产环境 CORS_ORIGINS 不能使用示例域名")
+
+
 @lru_cache
 def get_settings() -> Settings:
     base = Settings()
     environment = (base.environment or "development").strip().lower()
     key = (base.secret_key or "").strip()
-    insecure_keys = {"dev-secret-change-me", "change-me", "replace-me"}
     if environment in {"production", "prod", "staging"}:
-        if not key or key in insecure_keys or len(key) < 32:
-            raise RuntimeError(
-                "生产环境必须设置至少 32 位随机 SECRET_KEY，不能使用示例密钥"
-            )
+        _validate_production_placeholders(base)
         if "change-me-strong-db-password" in (base.database_url or "") or "change-me-strong-db-password" in (
             base.database_url_sync or ""
         ):
@@ -231,19 +304,25 @@ def get_settings() -> Settings:
         redis_url = urlsplit((base.redis_url or "").strip())
         if redis_url.scheme not in {"redis", "rediss"} or not redis_url.hostname or not redis_url.password:
             raise RuntimeError("生产环境 REDIS_URL 必须使用带密码的 redis:// 或 rediss:// URL")
-    elif not key or key in insecure_keys:
+    elif not key or _is_example_secret(key):
         # Development remains runnable without a checked-in predictable key,
-        # while restarts intentionally invalidate local sessions.
-        base.secret_key = secrets.token_urlsafe(48)
-        logger.warning("未配置安全 SECRET_KEY，已生成一次性开发密钥；生产环境将拒绝启动")
+        # while the value remains stable across diagnostic settings reloads.
+        global _DEV_EPHEMERAL_SECRET
+        if _DEV_EPHEMERAL_SECRET is None:
+            _DEV_EPHEMERAL_SECRET = secrets.token_urlsafe(48)
+            logger.warning("未配置安全 SECRET_KEY，已生成一次性开发密钥；生产环境将拒绝启动")
+        base.secret_key = _DEV_EPHEMERAL_SECRET
     try:
         from app.services.model_settings import get_overlay_dict
 
         overlay = get_overlay_dict()
-        if overlay:
-            return base.model_copy(update=overlay)
     except Exception:  # noqa: BLE001
-        pass
+        overlay = {}
+    if overlay:
+        effective = base.model_copy(update=overlay)
+        if environment in {"production", "prod", "staging"}:
+            _validate_production_placeholders(effective)
+        return effective
     return base
 
 

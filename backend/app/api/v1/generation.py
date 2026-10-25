@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +31,7 @@ from app.services.studio_tools import poll_video_task, ratio_to_size
 from app.services import storage
 
 router = APIRouter(prefix="/v1", tags=["public-api"])
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_api_user(
@@ -51,6 +55,12 @@ async def generate_image(
 ) -> V1GenerationOut:
     """文生图 / 图生图（Seedream）。"""
 
+    if body.image_url:
+        try:
+            await asyncio.to_thread(storage.validate_remote_reference_url, body.image_url.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     async def _exec() -> str:
         ark = get_ark()
         refs: list[str] | None = None
@@ -69,7 +79,8 @@ async def generate_image(
                 size=size,
             )
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=str(exc)[:400]) from exc
+            logger.exception("v1 image generation upstream failure")
+            raise HTTPException(status_code=502, detail="上游生图服务暂时不可用") from exc
 
         await record_seedream_image_usage(
             db,
@@ -113,6 +124,11 @@ async def generate_video(
 ) -> V1GenerationOut:
     """首帧图 + 文案 → Seedance 图生视频，返回 task_id。"""
 
+    try:
+        await asyncio.to_thread(storage.validate_remote_reference_url, body.image_url.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     async def _exec() -> str:
         ark = get_ark()
         try:
@@ -124,7 +140,8 @@ async def generate_video(
                 generate_audio=body.generate_audio,
             )
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=str(exc)[:400]) from exc
+            logger.exception("v1 video generation upstream failure")
+            raise HTTPException(status_code=502, detail="上游生视频服务暂时不可用") from exc
 
         return upstream_id
 
@@ -159,6 +176,16 @@ async def forward_seedance(
     """转发 Seedance 多模态 body 到 TokenFree。"""
     if not body.content:
         raise HTTPException(status_code=400, detail="content 不能为空")
+    for item in body.content:
+        kind = str(item.get("type") or "").strip()
+        if kind not in {"image_url", "audio_url", "video_url"}:
+            continue
+        raw = item.get(kind)
+        url = raw.get("url") if isinstance(raw, dict) else raw
+        try:
+            await asyncio.to_thread(storage.validate_remote_reference_url, str(url).strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings = get_settings()
     payload: dict = {
         "model": settings.model_video,
@@ -178,7 +205,8 @@ async def forward_seedance(
         try:
             upstream_id = await ark.gen_video_seedance_body(payload, project_id=0)
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=str(exc)[:400]) from exc
+            logger.exception("v1 Seedance generation upstream failure")
+            raise HTTPException(status_code=502, detail="上游生视频服务暂时不可用") from exc
 
         return upstream_id
 

@@ -498,11 +498,20 @@ async def upload_project_cover(
         else:
             raise HTTPException(status_code=400, detail="仅支持 JPG / PNG / WebP / GIF")
 
-    raw = await file.read()
+    max_bytes = 8 * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(min(1024 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=400, detail="封面不能超过 8MB")
+    raw = b"".join(chunks)
     if not raw:
         raise HTTPException(status_code=400, detail="空文件")
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="封面不能超过 8MB")
 
     dest = storage.project_dir(project_id) / f"cover{ext}"
     dest.write_bytes(raw)

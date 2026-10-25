@@ -1351,6 +1351,7 @@ async def generate_voice_asset_audio(
     sample_text: str | None = None,
     speaker: str | None = None,
     character_asset: DramaAsset | None = None,
+    commit: bool = True,
 ) -> DramaAsset:
     """为 voice 类型资产按提示词合成参考音频。"""
     return await synthesize_voice_asset(
@@ -1363,6 +1364,7 @@ async def generate_voice_asset_audio(
         speaker=speaker,
         character_name=character_asset.name if character_asset else None,
         character_asset=character_asset,
+        commit=commit,
     )
 
 

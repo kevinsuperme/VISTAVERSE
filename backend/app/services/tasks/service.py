@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import raiseload, selectinload
 
@@ -101,6 +101,37 @@ async def create_task(
 ) -> TaskRun:
     """创建任务并预写步骤。commit=False 时仅 flush，由调用方与业务状态同事务提交。"""
     await _validate_task_scope(db, user, body)
+    # Treat the public client request id as an idempotency key too. Some API
+    # callers do not populate the internal dedupe field.
+    dedupe_key = (body.dedupe_key or body.client_request_id or "").strip()
+    if dedupe_key:
+        # Serialize same-user retries on PostgreSQL before checking the active
+        # task. This closes the check-then-insert race without changing the
+        # schema contract for existing databases; a later migration can add a
+        # partial unique index as a second line of defence.
+        bind = db.bind
+        if bind is not None and bind.dialect.name == "postgresql":
+            await db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"printfilm.task.dedupe:{user.id}:{body.domain}:{body.task_type}:{dedupe_key}"},
+            )
+        active = {"pending", "leased", "running", "awaiting_poll", "cancel_requested"}
+        existing_result = await db.execute(
+            select(TaskRun)
+            .where(
+                TaskRun.requested_by == user.id,
+                TaskRun.domain == body.domain,
+                TaskRun.task_type == body.task_type,
+                TaskRun.dedupe_key == dedupe_key,
+                TaskRun.status.in_(active),
+            )
+            .order_by(TaskRun.id.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing is not None:
+            return existing
     handler = get_task_handler(body.domain, body.task_type)
     if handler is None:
         raise ValueError("当前任务类型尚未接入任务平台")
@@ -130,7 +161,7 @@ async def create_task(
         priority=body.priority,
         requested_by=user.id,
         client_request_id=body.client_request_id,
-        dedupe_key=body.dedupe_key,
+        dedupe_key=dedupe_key or None,
         batch_key=body.batch_key,
         provider_task_id=body.provider_task_id,
         cancelable=body.cancelable,
