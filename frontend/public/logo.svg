@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" fill="none" role="img" aria-labelledby="title desc" shape-rendering="geometricPrecision">
+  <title id="title">万象影界 VISTAVERSE</title>
+  <desc id="desc">万象影界标准品牌纯矢量 Logo</desc>
+  <defs>
+    <linearGradient id="bladeOuter" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B9AFD"/>
+      <stop offset="0.34" stop-color="#0CB8F5"/>
+      <stop offset="0.66" stop-color="#123FD5"/>
+      <stop offset="1" stop-color="#7D24FC"/>
+    </linearGradient>
+    <linearGradient id="bladeInner" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1653"/>
+      <stop offset="0.56" stop-color="#111B72"/>
+      <stop offset="1" stop-color="#2E34C9"/>
+    </linearGradient>
+    <linearGradient id="bladeEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#24D9FF"/>
+      <stop offset="0.52" stop-color="#F8FCFF"/>
+      <stop offset="1" stop-color="#B957FF"/>
+    </linearGradient>
+    <linearGradient id="outerGlow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#74F0FF" stop-opacity="0.72"/>
+      <stop offset="0.52" stop-color="#1D8BFF" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#E05CFF" stop-opacity="0.62"/>
+    </linearGradient>
+    <linearGradient id="starFill" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#6C2BFF"/>
+      <stop offset="0.32" stop-color="#B58CFF"/>
+      <stop offset="0.5" stop-color="#FFFFFF"/>
+      <stop offset="0.68" stop-color="#70F8FF"/>
+      <stop offset="1" stop-color="#3D5CFF"/>
+    </linearGradient>
+    <radialGradient id="starCore" cx="50%" cy="50%" r="68%">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.98"/>
+      <stop offset="0.62" stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g id="blades">
+    <g>    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430 C930 500 902 560 869 600 C790 500 700 405 560 337 C470 305 395 309 329 319 C323 312 326 304 330 299 Z" fill="url(#bladeOuter)"/>
+    <path d="M329 319 C395 309 470 305 560 337 C700 405 790 500 869 600 C832 616 793 597 758 559 C693 489 628 421 548 375 C470 331 393 315 329 319 Z" fill="url(#bladeInner)" opacity="0.96"/>
+    <path d="M329 319 C393 315 470 331 548 375 C628 421 693 489 758 559 C793 597 832 616 869 600" fill="none" stroke="url(#bladeEdge)" stroke-width="11" stroke-linecap="round" opacity="0.9"/>
+    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430" fill="none" stroke="url(#outerGlow)" stroke-width="6" stroke-linecap="round" opacity="0.58"/></g>
+    <g transform="rotate(90 627 627)">    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430 C930 500 902 560 869 600 C790 500 700 405 560 337 C470 305 395 309 329 319 C323 312 326 304 330 299 Z" fill="url(#bladeOuter)"/>
+    <path d="M329 319 C395 309 470 305 560 337 C700 405 790 500 869 600 C832 616 793 597 758 559 C693 489 628 421 548 375 C470 331 393 315 329 319 Z" fill="url(#bladeInner)" opacity="0.96"/>
+    <path d="M329 319 C393 315 470 331 548 375 C628 421 693 489 758 559 C793 597 832 616 869 600" fill="none" stroke="url(#bladeEdge)" stroke-width="11" stroke-linecap="round" opacity="0.9"/>
+    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430" fill="none" stroke="url(#outerGlow)" stroke-width="6" stroke-linecap="round" opacity="0.58"/></g>
+    <g transform="rotate(180 627 627)">    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430 C930 500 902 560 869 600 C790 500 700 405 560 337 C470 305 395 309 329 319 C323 312 326 304 330 299 Z" fill="url(#bladeOuter)"/>
+    <path d="M329 319 C395 309 470 305 560 337 C700 405 790 500 869 600 C832 616 793 597 758 559 C693 489 628 421 548 375 C470 331 393 315 329 319 Z" fill="url(#bladeInner)" opacity="0.96"/>
+    <path d="M329 319 C393 315 470 331 548 375 C628 421 693 489 758 559 C793 597 832 616 869 600" fill="none" stroke="url(#bladeEdge)" stroke-width="11" stroke-linecap="round" opacity="0.9"/>
+    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430" fill="none" stroke="url(#outerGlow)" stroke-width="6" stroke-linecap="round" opacity="0.58"/></g>
+    <g transform="rotate(270 627 627)">    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430 C930 500 902 560 869 600 C790 500 700 405 560 337 C470 305 395 309 329 319 C323 312 326 304 330 299 Z" fill="url(#bladeOuter)"/>
+    <path d="M329 319 C395 309 470 305 560 337 C700 405 790 500 869 600 C832 616 793 597 758 559 C693 489 628 421 548 375 C470 331 393 315 329 319 Z" fill="url(#bladeInner)" opacity="0.96"/>
+    <path d="M329 319 C393 315 470 331 548 375 C628 421 693 489 758 559 C793 597 832 616 869 600" fill="none" stroke="url(#bladeEdge)" stroke-width="11" stroke-linecap="round" opacity="0.9"/>
+    <path d="M330 299 C390 185 520 120 658 130 C820 132 930 250 931 430" fill="none" stroke="url(#outerGlow)" stroke-width="6" stroke-linecap="round" opacity="0.58"/></g>
+  </g>
+  <g id="star">
+    <path d="M627 403 C645 514 708 575 851 627 C708 648 646 715 627 845 C608 715 545 648 412 627 C545 605 608 539 627 403 Z" fill="url(#starFill)" stroke="#EAFDFF" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M627 485 C641 555 686 608 768 627 C686 642 641 691 627 771 C613 691 568 642 486 627 C568 608 613 555 627 485 Z" fill="url(#starCore)"/>
+  </g>
+</svg>
