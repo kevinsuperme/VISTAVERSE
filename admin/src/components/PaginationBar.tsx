@@ -30,9 +30,7 @@ export function PaginationBar({
   const to = Math.min(page * pageSize, total);
 
   return (
-    <div
-      className={cn("admin-pagination", className)}
-    >
+    <nav className={cn("admin-pagination", className)} aria-label="分页">
       <div className="flex flex-wrap items-center gap-3">
         <span>
           共 <em className="not-italic font-semibold text-[var(--admin-text)]">{total}</em> 条
@@ -43,7 +41,7 @@ export function PaginationBar({
           <label className="flex items-center gap-1.5 text-xs">
             <span>每页</span>
             <select
-              className="admin-select !h-7 !min-w-[4rem] !text-xs"
+              className="admin-select !h-10 !min-w-[4rem] !text-xs"
               value={pageSize}
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
             >
@@ -58,7 +56,7 @@ export function PaginationBar({
         )}
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" role="group" aria-label="页码">
         <button
           type="button"
           className="admin-page-btn"
@@ -78,6 +76,8 @@ export function PaginationBar({
               key={n}
               type="button"
               className={cn("admin-page-btn", n === page && "is-active")}
+              aria-label={`第 ${n} 页`}
+              aria-current={n === page ? "page" : undefined}
               onClick={() => onPageChange(n)}
             >
               {n}
@@ -94,6 +94,6 @@ export function PaginationBar({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-    </div>
+    </nav>
   );
 }

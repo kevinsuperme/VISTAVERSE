@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
+import { safeNextPath } from "@/lib/authRedirect";
 import { api, type AdminDramaProject } from "@/api/client";
 import {
   AdminDetailMeta,
@@ -26,30 +27,21 @@ function isTabKey(value: string | null): value is TabKey {
 /** 漫剧项目二级详情：概览 / 分集 / 资产 / 任务 */
 export function DramaProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = safeNextPath((location.state as { from?: string } | null)?.from, "/drama-projects");
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tab: TabKey = isTabKey(tabParam) ? tabParam : "overview";
 
-  const [detail, setDetail] = useState<AdminDramaProject | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: detail, loading, error, run } = useAdminRequest<AdminDramaProject>();
 
   const id = Number(projectId);
 
-  useEffect(() => {
-    if (!id || Number.isNaN(id)) {
-      navigate("/drama-projects", { replace: true });
-      return;
-    }
-    setLoading(true);
-    void api<AdminDramaProject>(`/api/admin/drama-projects/${id}`)
-      .then(setDetail)
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "加载失败");
-        navigate("/drama-projects", { replace: true });
-      })
-      .finally(() => setLoading(false));
-  }, [id, navigate]);
+  const load = useCallback(() => run(() => {
+    if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error("无效的详情编号"));
+    return api<AdminDramaProject>(`/api/admin/drama-projects/${id}`);
+  }), [id, run]);
+  useEffect(() => { void load(); }, [load]);
 
   function setTab(next: TabKey) {
     const params = new URLSearchParams(searchParams);
@@ -60,16 +52,16 @@ export function DramaProjectDetailPage() {
 
   const usage = detail?.usage;
 
-  if (loading && !detail) {
+  if (loading) {
     return <div className="admin-detail-page-loading">加载中…</div>;
   }
-  if (!detail) return null;
+  if (error || !detail) return <div className="admin-route-state" role="alert"><p>{error || "未找到详情"}</p><Button onClick={() => void load()}>重新加载</Button><Button variant="outline" asChild><Link to={returnTo}>返回列表</Link></Button></div>;
 
   return (
     <div className="admin-detail-page">
       <div className="admin-detail-page-toolbar">
         <Button variant="ghost" size="sm" className="admin-detail-back" asChild>
-          <Link to="/drama-projects">
+          <Link to={returnTo}>
             <ArrowLeft className="h-4 w-4" />
             返回列表
           </Link>

@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 // Table primitives tuned for admin lists
 export function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
-    <div className="admin-data-table">
-      <table className={cn("w-full caption-bottom text-sm", className)} {...props} />
+    <div className="admin-data-table" tabIndex={0} role="region" aria-label="数据表格，可横向滚动">
+      <table className={cn("w-full min-w-[640px] caption-bottom text-sm", className)} {...props} />
     </div>
   );
 }

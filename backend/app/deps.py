@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, Header, status
+from fastapi import Depends, HTTPException, Header, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,8 +53,12 @@ async def get_api_user(
     return user
 
 
-async def get_current_admin(user: User = Depends(get_current_user)) -> User:
-    # Require role=admin for /api/admin routes
-    if (user.role or "user") != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+async def get_current_admin(request: Request, user: User = Depends(get_current_user)) -> User:
+    """后台权限在服务端按已匹配路由校验；未登记路由拒绝访问。"""
+    from app.services.admin.permissions import permissions_for, route_permissions
+
+    route = request.scope.get("route")
+    allowed = route_permissions(request.method, getattr(route, "path", ""))
+    if not allowed.intersection(permissions_for(user.role)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有访问此后台功能的权限")
     return user

@@ -1,3 +1,7 @@
+import { useAdminRequest } from "@/hooks/useAdminRequest";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
+import { hasPermission } from "@/lib/permissions";
+import { AdminExportButton } from "@/components/admin/AdminExportButton";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AdminChipFilter } from "@/components/admin/AdminChipFilter";
@@ -26,29 +30,18 @@ function profitClass(profitFen: number): string {
 
 /** 管理端财务列表：按日展示扣费、成本、token、实际成本与利润 */
 export function FinanceListPage() {
-  const [days, setDays] = useState<FinanceDays>("30");
-  const [data, setData] = useState<AdminFinanceDaily | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useAdminUrlState<FinanceDays>("days", "30");
+  const { data, loading, error, run } = useAdminRequest<AdminFinanceDaily>();
   const [syncing, setSyncing] = useState(false);
+  const [refresh, setRefresh] = useState(0);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api<AdminFinanceDaily>(`/api/admin/finance/daily?days=${days}`);
-      setData(res);
-    } catch (err) {
-      setData(null);
-      toast.error(err instanceof Error ? err.message : "财务列表加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
+  const loadData = useCallback(() => run(() => api<AdminFinanceDaily>(`/api/admin/finance/daily?days=${days}`)), [days, run]);
 
   const syncOfficial = useCallback(async () => {
     setSyncing(true);
     try {
-      const res = await api<AdminFinanceDaily>(`/api/admin/finance/daily/sync?days=${days}`, { method: "POST" });
-      setData(res);
+      await api<AdminFinanceDaily>(`/api/admin/finance/daily/sync?days=${days}`, { method: "POST" });
+      setRefresh((value) => value + 1);
       toast.success("官方成本已刷新");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "刷新失败");
@@ -59,7 +52,7 @@ export function FinanceListPage() {
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, refresh]);
 
   const rows = [...(data?.series ?? [])].reverse();
   const totals = data?.totals;
@@ -89,11 +82,11 @@ export function FinanceListPage() {
             : "未配置 TokenFree API Key，实际成本列为空；请在「系统设置 → 模型」填写后刷新"
         }
         actions={
-          data?.configured ? (
+          <div className="flex flex-wrap gap-2"><AdminExportButton path={`/api/admin/finance/export?days=${days}`} filename="vistaverse-finance.csv" />{data?.configured && hasPermission("finance:write") ? (
             <Button type="button" size="sm" variant="outline" disabled={syncing || loading} onClick={() => void syncOfficial()}>
               {syncing ? "刷新中…" : "刷新官方成本"}
             </Button>
-          ) : null
+          ) : null}</div>
         }
         bodyClassName="!pt-0"
       >
@@ -116,7 +109,7 @@ export function FinanceListPage() {
                     加载中…
                   </TableCell>
                 </TableRow>
-              ) : rows.length === 0 ? (
+              ) : error ? <TableRow><TableCell colSpan={6}><div role="alert">{error}<Button size="sm" variant="outline" onClick={() => void loadData()}>重新加载</Button></div></TableCell></TableRow> : rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="!text-center text-[var(--admin-muted)]">
                     暂无数据

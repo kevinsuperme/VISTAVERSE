@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_serializer, field_validator
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_serializer, field_validator
 
 from app.schemas_common import PageMeta
 from app.schemas_tasks import TaskRunBriefOut
@@ -46,6 +47,13 @@ class UserOut(BaseModel):
     phone: str = ""
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def permissions(self) -> list[str]:
+        """客户端权限取自与后端校验相同的角色矩阵。"""
+        from app.services.admin.permissions import permissions_for
+        return permissions_for(self.role)
 
     @field_validator("phone", mode="before")
     @classmethod
@@ -516,13 +524,15 @@ class AdminUserListOut(BaseModel):
 
 
 class AdminUserPatch(BaseModel):
-    plan: str | None = None
-    role: str | None = None
+    plan: str | None = Field(default=None, max_length=32)
+    role: str | None = Field(default=None, max_length=16)
     # 相对调账（分）：正数增加、负数减少；与 balance_fen 互斥，优先本字段
-    balance_delta_fen: int | None = None
+    balance_delta_fen: int | None = Field(default=None, ge=-2_147_483_647, le=2_147_483_647)
     # 兼容旧客户端：绝对目标余额（分）
-    balance_fen: int | None = None
-    balance_note: str | None = None
+    balance_fen: int | None = Field(default=None, ge=0, le=2_147_483_647)
+    balance_note: str | None = Field(default=None, max_length=255)
+    balance_request_id: UUID | None = None
+    expected_balance_fen: int | None = Field(default=None, ge=0, le=2_147_483_647)
 
 
 class AdminOrderOut(BaseModel):
@@ -615,6 +625,9 @@ class AdminWorkOut(BaseModel):
     video_url: str
     visibility: str
     audit_status: str
+    audit_reason: str = ""
+    audited_by: int | None = None
+    audited_at: datetime | None = None
     published_at: datetime
 
     model_config = {"from_attributes": True}
@@ -628,6 +641,7 @@ class AdminWorkListOut(BaseModel):
 class AdminWorkPatch(BaseModel):
     visibility: str | None = None
     audit_status: str | None = None
+    audit_reason: str | None = Field(default=None, max_length=500)
 
 
 class AdminTemplateOut(BaseModel):

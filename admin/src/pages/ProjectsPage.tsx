@@ -1,5 +1,5 @@
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { api, type AdminProject, type PageMeta } from "@/api/client";
 import {
   AdminDetailMeta,
@@ -9,6 +9,8 @@ import {
   AdminDetailTableWrap,
 } from "@/components/admin/AdminDetailLayout";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
 import { AdminFilterBar } from "@/components/admin/AdminFilterBar";
 import { AdminModal } from "@/components/admin/AdminModal";
 import { AdminUserSearchSelect } from "@/components/admin/AdminUserSearchSelect";
@@ -43,25 +45,23 @@ function mediaSrc(url: string | null | undefined): string {
 
 // 科普项目列表与详情（镜头 / 任务 / 费用 / 媒体预览）
 export function ProjectsPage() {
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [userId, setUserId] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<ListRes | null>(null);
+  const [q, setQ] = useAdminUrlState<string>("q", "");
+  const [status, setStatus] = useAdminUrlState<string>("status", "");
+  const [userId, setUserId] = useAdminUrlState<number | null>("user_id", null);
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const { data, loading, error, run } = useAdminRequest<ListRes>();
   const [detail, setDetail] = useState<AdminProject | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailRetry, setDetailRetry] = useState(0);
   const projectDetail = useAdminDetailQuery("open");
 
   async function load(nextPage = page) {
-    try {
-      const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
-      if (status) params.set("status", status);
-      if (q.trim()) params.set("q", q.trim());
-      if (userId) params.set("user_id", String(userId));
-      setData(await api<ListRes>(`/api/admin/projects?${params}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    }
+  const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
+  if (status) params.set("status", status);
+  if (q.trim()) params.set("q", q.trim());
+  if (userId) params.set("user_id", String(userId));
+    await run(() => api<ListRes>(`/api/admin/projects?${params}`));
   }
 
   useEffect(() => {
@@ -69,17 +69,8 @@ export function ProjectsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
-  async function openDetail(id: number) {
-    setDetailLoading(true);
+  function openDetail(id: number) {
     projectDetail.open(id);
-    try {
-      setDetail(await api<AdminProject>(`/api/admin/projects/${id}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载详情失败");
-      projectDetail.close();
-    } finally {
-      setDetailLoading(false);
-    }
   }
 
   useEffect(() => {
@@ -87,10 +78,16 @@ export function ProjectsPage() {
       setDetail(null);
       return;
     }
-    if (detail?.id === projectDetail.id) return;
-    void openDetail(projectDetail.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectDetail.id]);
+    let cancelled = false;
+    setDetail(null);
+    setDetailLoading(true);
+    setDetailError(null);
+    void api<AdminProject>(`/api/admin/projects/${projectDetail.id}`)
+      .then((value) => { if (!cancelled) setDetail(value); })
+      .catch((cause) => { if (!cancelled) setDetailError(cause instanceof Error ? cause.message : "加载详情失败"); })
+      .finally(() => { if (!cancelled) setDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectDetail.id, detailRetry]);
 
   const usage = detail?.usage;
 
@@ -112,13 +109,14 @@ export function ProjectsPage() {
           variant="secondary"
           className="admin-filter-action"
           onClick={() => {
-            setPage(1);
-            void load(1);
+            if (page === 1) void load(1);
+            else setPage(1);
           }}
         >
           筛选
         </Button>
       </AdminFilterBar>
+      <AdminListState loading={loading} error={error} empty={!data?.items.length} onRetry={() => void load()}>
       <div className="rounded-lg border bg-background">
         <Table>
           <TableHeader>
@@ -169,7 +167,8 @@ export function ProjectsPage() {
           </TableBody>
         </Table>
       </div>
-      {data && (
+      </AdminListState>
+      {!loading && !error && data && (
         <PaginationBar
           page={data.meta.page}
           pageSize={data.meta.page_size}
@@ -180,6 +179,7 @@ export function ProjectsPage() {
 
       <AdminModal
         open={projectDetail.isOpen}
+        presentation="drawer"
         onOpenChange={(open) => {
           if (!open) {
             setDetail(null);
@@ -191,6 +191,7 @@ export function ProjectsPage() {
         subtitle={detail ? projectStatusLabel(detail.status) : detailLoading ? "加载中…" : undefined}
         bodyClassName="space-y-3"
       >
+        {detailError ? <div className="admin-empty" role="alert"><p>{detailError}</p><Button variant="outline" onClick={() => setDetailRetry((value) => value + 1)}>重试</Button></div> : null}
         {detailLoading && !detail ? (
           <div className="py-10 text-center text-sm text-[var(--admin-muted)]">加载中…</div>
         ) : null}

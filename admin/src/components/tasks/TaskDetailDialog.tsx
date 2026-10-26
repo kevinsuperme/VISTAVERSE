@@ -1,8 +1,10 @@
 import {
   Children,
   isValidElement,
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -11,6 +13,7 @@ import { toast } from "sonner";
 import { api, type AdminTaskDetail } from "@/api/client";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
 import { AdminModal } from "@/components/admin/AdminModal";
+import { AdminConfirmDialog } from "@/components/admin/AdminConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,6 +24,7 @@ import { useTaskClock } from "@/hooks/useTaskClock";
 import { taskDomainLabel, taskStatusLabel, taskTypeLabel } from "@/lib/statusLabels";
 import { hasJsonContent, prettyJson } from "@/lib/jsonPreview";
 import { cn, fenToYuan } from "@/lib/utils";
+import { hasPermission } from "@/lib/permissions";
 import { redactTaskData, redactTaskText, taskBilling, taskStatusTone } from "@/lib/taskObservability";
 
 type TaskDetailDialogProps = {
@@ -130,54 +134,63 @@ export function TaskDetailDialog({ taskId, open, onOpenChange, onCancelled }: Ta
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<DetailTab>("overview");
   const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
+  const cancelLock = useRef(false);
   const now = useTaskClock(open && Boolean(task) && !TERMINAL.has(task?.status || ""));
   const billing = taskBilling(task || {});
 
-  async function loadDetail(id: number) {
-    setLoading(true);
+  const loadDetail = useCallback(async (id: number, silent = false) => {
+    if (cancelLock.current) return;
+    const current = ++requestSequence.current;
+    if (!silent) setLoading(true);
+    setError(null);
     try {
-      setTask(await api<AdminTaskDetail>(`/api/admin/tasks/${id}`));
+      const result = await api<AdminTaskDetail>(`/api/admin/tasks/${id}`);
+      if (current === requestSequence.current) setTask(result);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载任务详情失败");
-      onOpenChange(false);
+      if (current === requestSequence.current) setError(err instanceof Error ? err.message : "加载任务详情失败");
     } finally {
-      setLoading(false);
+      if (current === requestSequence.current) setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
+    setTask(null);
+    setTab("overview");
+    setError(null);
+    setCancelError(null);
+    setConfirmCancel(false);
     if (!open || !taskId) {
-      setTask(null);
-      setTab("overview");
       return;
     }
     void loadDetail(taskId);
-  }, [open, taskId]);
+    return () => { requestSequence.current += 1; };
+  }, [open, taskId, loadDetail]);
 
+  const taskStatus = task?.status;
+  const billingStatus = task?.billing_status;
   useEffect(() => {
-    if (!open || !taskId || !task || (TERMINAL.has(task.status) && task.billing_status !== "frozen")) return;
-    let cancelled = false;
+    if (!open || !taskId || !taskStatus || loading || cancelling || confirmCancel || (TERMINAL.has(taskStatus) && billingStatus !== "frozen")) return;
     let inFlight = false;
     const timer = window.setInterval(async () => {
       if (inFlight) return;
       inFlight = true;
       try {
-        const current = await api<AdminTaskDetail>(`/api/admin/tasks/${taskId}`);
-        if (!cancelled) setTask(current);
-      } catch {
-        // A transient refresh failure keeps the last verified snapshot visible.
+        await loadDetail(taskId, true);
       } finally {
         inFlight = false;
       }
     }, 5000);
     return () => {
-      cancelled = true;
       window.clearInterval(timer);
     };
-  }, [open, taskId, task?.status, task?.billing_status]);
+  }, [open, taskId, taskStatus, billingStatus, loading, cancelling, confirmCancel, loadDetail]);
 
   const canCancel = useMemo(() => {
-    if (!task) return false;
+    if (!task || !hasPermission("tasks:write")) return false;
     return task.cancelable && !TERMINAL.has(task.status);
   }, [task]);
 
@@ -189,17 +202,24 @@ export function TaskDetailDialog({ taskId, open, onOpenChange, onCancelled }: Ta
   const payloadRows = useMemo(() => payloadSummaryRows(redactTaskData(task?.payload) as Record<string, unknown> | null), [task?.payload]);
 
   async function handleCancel() {
-    if (!task || !canCancel) return;
-    if (!window.confirm(`确定取消任务 #${task.id}？`)) return;
+    if (!task || !canCancel || cancelLock.current) return;
+    cancelLock.current = true;
+    const current = ++requestSequence.current;
+    setCancelError(null);
     setCancelling(true);
     try {
       const updated = await api<AdminTaskDetail>(`/api/admin/tasks/${task.id}/cancel`, { method: "POST" });
-      setTask(updated);
+      if (current === requestSequence.current) {
+        setTask(updated);
+        setConfirmCancel(false);
+      }
       toast.success("已提交取消请求");
       onCancelled?.();
     } catch (err) {
+      if (current === requestSequence.current) setCancelError(err instanceof Error ? err.message : "取消失败，请重试");
       toast.error(err instanceof Error ? err.message : "取消失败");
     } finally {
+      cancelLock.current = false;
       setCancelling(false);
     }
   }
@@ -207,8 +227,10 @@ export function TaskDetailDialog({ taskId, open, onOpenChange, onCancelled }: Ta
   const title = task ? `任务 #${task.id} · ${taskDomainLabel(task.domain)}` : "任务详情";
 
   return (
-    <AdminModal
+    <><AdminModal
+      presentation="drawer"
       open={open}
+      busy={cancelling}
       onOpenChange={onOpenChange}
       size="full"
       className="task-detail-modal max-h-[92vh]"
@@ -224,17 +246,17 @@ export function TaskDetailDialog({ taskId, open, onOpenChange, onCancelled }: Ta
       }
       footer={
         <>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" disabled={cancelling} onClick={() => onOpenChange(false)}>
             关闭
           </Button>
           {taskId ? (
-            <Button variant="outline" disabled={loading} onClick={() => void loadDetail(taskId)}>
+            <Button variant="outline" disabled={loading || cancelling} onClick={() => void loadDetail(taskId)}>
               <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
               刷新
             </Button>
           ) : null}
           {canCancel ? (
-            <Button variant="destructive" disabled={cancelling} onClick={() => void handleCancel()}>
+            <Button variant="destructive" disabled={loading || cancelling} onClick={() => { setCancelError(null); setConfirmCancel(true); }}>
               {cancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
               取消任务
             </Button>
@@ -242,6 +264,7 @@ export function TaskDetailDialog({ taskId, open, onOpenChange, onCancelled }: Ta
         </>
       }
     >
+      {error ? <div className="admin-empty" role="alert"><p>{task ? "刷新失败，以下为上次成功加载的数据。" : "任务详情加载失败。"}{error}</p><Button variant="outline" disabled={loading || cancelling} onClick={() => { if (taskId) void loadDetail(taskId); }}>重试</Button></div> : null}
       {loading && !task ? (
         <div className="task-detail-loading">
           <Loader2 className="h-6 w-6 animate-spin text-[#67c23a]" />
@@ -532,5 +555,7 @@ export function TaskDetailDialog({ taskId, open, onOpenChange, onCancelled }: Ta
         </Tabs>
       ) : null}
     </AdminModal>
+    <AdminConfirmDialog open={open && confirmCancel} onOpenChange={setConfirmCancel} title={`取消任务 #${task?.id ?? taskId}`} description={cancelError ? `取消失败：${cancelError}` : "将请求停止此任务。已完成的上游调用可能仍产生费用，请核对任务和计费记录。"} destructive confirmLabel="确认取消任务" loading={cancelling} onConfirm={() => void handleCancel()} />
+    </>
   );
 }

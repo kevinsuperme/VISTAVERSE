@@ -200,6 +200,9 @@ class Work(Base):
     video_url: Mapped[str] = mapped_column(String(1024))
     visibility: Mapped[str] = mapped_column(String(16), default="public")
     audit_status: Mapped[str] = mapped_column(String(16), default="passed")
+    audit_reason: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    audited_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

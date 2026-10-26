@@ -57,7 +57,7 @@ async def test_admin_patch_user_balance_delta_decrease(db_session: AsyncSession)
 
     out = await patch_user(
         user_id=user.id,
-        body=AdminUserPatch(balance_delta_fen=-300),
+        body=AdminUserPatch(balance_delta_fen=-300, balance_note="回归测试"),
         admin=admin,
         db=db_session,
     )
@@ -88,7 +88,7 @@ async def test_admin_patch_user_balance_delta_rejects_negative_result(
     with pytest.raises(HTTPException) as exc:
         await patch_user(
             user_id=user.id,
-            body=AdminUserPatch(balance_delta_fen=-200),
+            body=AdminUserPatch(balance_delta_fen=-200, balance_note="回归测试"),
             admin=admin,
             db=db_session,
         )

@@ -37,7 +37,10 @@ export function OrderDetailDialog({
   orderDetail,
   open,
   onClose,
-}: { orderDetail: AdminOrder | null; open: boolean; onClose: () => void }) {
+  loading = false,
+  error = null,
+  onRetry,
+}: { orderDetail: AdminOrder | null; open: boolean; onClose: () => void; loading?: boolean; error?: string | null; onRetry?: () => void }) {
   // 将商户单号写入剪贴板，并反馈复制结果。
   async function copyText(text: string) {
     try {
@@ -50,7 +53,8 @@ export function OrderDetailDialog({
 
   return (
     <AdminModal
-      open={open && !!orderDetail}
+      open={open}
+      presentation="drawer"
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
       size="md"
       title={orderDetail ? `订单明细 #${orderDetail.id}` : "订单明细"}
@@ -63,6 +67,8 @@ export function OrderDetailDialog({
         ) : undefined
       }
     >
+      {loading ? <div className="admin-empty" role="status">加载订单详情…</div> : null}
+      {error ? <div className="admin-empty" role="alert"><p>{error}</p>{onRetry ? <Button variant="outline" onClick={onRetry}>重试</Button> : null}</div> : null}
       {orderDetail ? (
         <AdminDetailSection>
           <AdminDetailMeta
@@ -108,6 +114,7 @@ export function LedgerDetailDialog({
   return (
     <AdminModal
       open={!!ledgerDetail}
+      presentation="drawer"
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
       size="md"
       title={ledgerDetail ? `流水明细 #${ledgerDetail.id}` : "流水明细"}

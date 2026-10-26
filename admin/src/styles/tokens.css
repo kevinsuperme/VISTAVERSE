@@ -1,0 +1,52 @@
+@theme inline {
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.97 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-border: oklch(0.922 0 0);
+  --color-input: oklch(0.922 0 0);
+  --color-ring: oklch(0.708 0 0);
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --font-display: "Anybody", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Shared with portaled dialogs and menus outside .admin-app. */
+:root {
+  --admin-bg: #e9eef5;
+  --admin-bg-subtle: #dfe6f0;
+  --admin-card: #ffffff;
+  --admin-text: #1a211c;
+  --admin-muted: #64748b;
+  --admin-border: #e2e8f0;
+  --admin-table-head: #e9f0fb;
+  --admin-table-head-text: #5b6b7c;
+  --admin-tag-bg: #e8f1ff;
+  --admin-tag-text: #3d6ea8;
+  --admin-forest: #1f5c48;
+  --admin-forest-deep: #163f33;
+  --admin-accent: #3d9a72;
+  --admin-accent-soft: rgba(61, 154, 114, 0.12);
+  --admin-accent-ring: rgba(31, 92, 72, 0.16);
+  --admin-sidebar: #142820;
+  --admin-sidebar-border: rgba(255, 255, 255, 0.06);
+  --admin-sidebar-text: rgba(240, 245, 242, 0.72);
+  --admin-sidebar-muted: rgba(240, 245, 242, 0.42);
+  --admin-sidebar-w: 232px;
+  --admin-radius: 12px;
+  --admin-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.05);
+}

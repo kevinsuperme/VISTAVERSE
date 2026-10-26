@@ -1,5 +1,7 @@
 # Admin order list
-from fastapi import APIRouter, Depends, Query
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -14,6 +16,7 @@ router = APIRouter()
 
 @router.get("/orders", response_model=AdminOrderListOut)
 async def list_orders(
+    id: Annotated[int | None, Query(ge=1)] = None,
     status: str | None = None,
     user_id: int | None = None,
     out_trade_no: str | None = None,
@@ -30,6 +33,9 @@ async def list_orders(
     if status and status.strip():
         stmt = stmt.where(Order.status == status.strip())
         count_stmt = count_stmt.where(Order.status == status.strip())
+    if id is not None:
+        stmt = stmt.where(Order.id == id)
+        count_stmt = count_stmt.where(Order.id == id)
     if user_id is not None:
         stmt = stmt.where(Order.user_id == user_id)
         count_stmt = count_stmt.where(Order.user_id == user_id)
@@ -52,3 +58,15 @@ async def list_orders(
         items.append(data)
 
     return AdminOrderListOut(items=items, meta=PageMeta(page=page, page_size=page_size, total=total))
+
+
+@router.get("/orders/{order_id}", response_model=AdminOrderOut)
+async def get_order(order_id: int, _admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_db)) -> AdminOrderOut:
+    """按订单主键返回独立详情。"""
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    owner = await db.get(User, order.user_id)
+    data = AdminOrderOut.model_validate(order)
+    data.user_email = owner.email if owner else None
+    return data

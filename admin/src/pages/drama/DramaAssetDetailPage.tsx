@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { toast } from "sonner";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
+import { safeNextPath } from "@/lib/authRedirect";
 import { api, type AdminDramaAsset } from "@/api/client";
 import { AdminDetailMeta, AdminDetailSection } from "@/components/admin/AdminDetailLayout";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
@@ -11,30 +12,21 @@ import { dramaAssetTypeLabel, formatDramaGenerationStatus } from "@/lib/dramaLab
 /** 漫剧资产详情二级页 */
 export function DramaAssetDetailPage() {
   const { assetId } = useParams<{ assetId: string }>();
-  const navigate = useNavigate();
-  const [detail, setDetail] = useState<AdminDramaAsset | null>(null);
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const returnTo = safeNextPath((location.state as { from?: string } | null)?.from, "/drama-assets");
+  const { data: detail, loading, error, run } = useAdminRequest<AdminDramaAsset>();
   const id = Number(assetId);
 
-  useEffect(() => {
-    if (!id || Number.isNaN(id)) {
-      navigate("/drama-assets", { replace: true });
-      return;
-    }
-    setLoading(true);
-    void api<AdminDramaAsset>(`/api/admin/drama-assets/${id}`)
-      .then(setDetail)
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "加载失败");
-        navigate("/drama-assets", { replace: true });
-      })
-      .finally(() => setLoading(false));
-  }, [id, navigate]);
+  const load = useCallback(() => run(() => {
+    if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error("无效的详情编号"));
+    return api<AdminDramaAsset>(`/api/admin/drama-assets/${id}`);
+  }), [id, run]);
+  useEffect(() => { void load(); }, [load]);
 
-  if (loading && !detail) {
+  if (loading) {
     return <div className="admin-detail-page-loading">加载中…</div>;
   }
-  if (!detail) return null;
+  if (error || !detail) return <div className="admin-route-state" role="alert"><p>{error || "未找到详情"}</p><Button onClick={() => void load()}>重新加载</Button><Button variant="outline" asChild><Link to={returnTo}>返回列表</Link></Button></div>;
 
   const mediaUrl = detail.cover || detail.url;
 
@@ -42,7 +34,7 @@ export function DramaAssetDetailPage() {
     <div className="admin-detail-page">
       <div className="admin-detail-page-toolbar">
         <Button variant="ghost" size="sm" className="admin-detail-back" asChild>
-          <Link to="/drama-assets">
+          <Link to={returnTo}>
             <ArrowLeft className="h-4 w-4" />
             返回资产库
           </Link>

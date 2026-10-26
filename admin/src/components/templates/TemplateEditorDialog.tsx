@@ -1,5 +1,5 @@
 import { ImageOff, Loader2, Save } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { AdminTemplate } from "@/api/client";
 import { AdminField } from "@/components/admin/AdminField";
 import { AdminModal } from "@/components/admin/AdminModal";
@@ -38,6 +38,7 @@ type TemplateEditorDialogProps = {
   onOpenChange: (open: boolean) => void;
   onChange: (patch: Partial<TemplateFormState>) => void;
   onSave: () => void;
+  readOnly?: boolean;
 };
 
 type EditorTab = "basic" | "prompts" | "publish";
@@ -74,11 +75,14 @@ export function TemplateEditorDialog({
   onOpenChange,
   onChange,
   onSave,
+  readOnly = false,
 }: TemplateEditorDialogProps) {
   const [tab, setTab] = useState<EditorTab>("basic");
+  const tabsId = useId();
   const previewSrc = useMemo(() => coverPreviewSrc(form.preview_cover), [form.preview_cover]);
 
   const handleOpenChange = (next: boolean) => {
+    if (saving) return;
     if (!next) setTab("basic");
     onOpenChange(next);
   };
@@ -88,24 +92,25 @@ export function TemplateEditorDialog({
       open={open}
       onOpenChange={handleOpenChange}
       size="full"
+      busy={saving}
       className="template-editor-dialog max-h-[92vh] overflow-hidden"
       bodyClassName="p-0 overflow-hidden"
-      title={editing ? `编辑模板 · ${editing.name}` : "新建模板"}
+      title={editing ? `${readOnly ? "模板详情" : "编辑模板"} · ${editing.name}` : "新建模板"}
       subtitle={editing ? editing.id : "填写基础信息与提示词，保存后立即生效"}
       footer={
         <>
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>
-            取消
+          <Button variant="outline" disabled={saving} onClick={() => handleOpenChange(false)}>
+            {readOnly ? "关闭" : "取消"}
           </Button>
-          <Button disabled={saving} onClick={onSave}>
+          {!readOnly ? <Button disabled={saving} onClick={onSave}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             {saving ? "保存中…" : "保存模板"}
-          </Button>
+          </Button> : null}
         </>
       }
     >
       <div className="template-editor-layout">
-        <aside className="template-editor-preview">
+        <fieldset disabled={readOnly || saving} className="template-editor-preview min-w-0 border-0 m-0">
           <div className="template-editor-preview-frame">
             {previewSrc ? (
               <img src={previewSrc} alt="封面预览" className="template-editor-preview-img" />
@@ -124,15 +129,17 @@ export function TemplateEditorDialog({
               onChange={(e) => onChange({ preview_cover: e.target.value })}
             />
           </AdminField>
-        </aside>
+        </fieldset>
 
         <div className="template-editor-main">
-          <div className="template-editor-tabs" role="tablist">
+          <div className="template-editor-tabs" role="tablist" aria-label="模板配置">
             {TABS.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 role="tab"
+                id={`${tabsId}-${item.id}`}
+                aria-controls={`${tabsId}-panel`}
                 aria-selected={tab === item.id}
                 className={cn("template-editor-tab", tab === item.id && "is-active")}
                 onClick={() => setTab(item.id)}
@@ -142,7 +149,7 @@ export function TemplateEditorDialog({
             ))}
           </div>
 
-          <div className="template-editor-panel">
+          <fieldset disabled={readOnly || saving} className="template-editor-panel min-w-0 border-0 m-0" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${tab}`}>
             {tab === "basic" ? (
               <div className="template-editor-grid">
                 {!editing ? (
@@ -150,6 +157,8 @@ export function TemplateEditorDialog({
                     <Input
                       className="admin-input h-9"
                       placeholder="例如 live_street_interview"
+                      maxLength={64}
+                      required
                       value={form.id}
                       onChange={(e) => onChange({ id: e.target.value })}
                     />
@@ -158,6 +167,8 @@ export function TemplateEditorDialog({
                 <AdminField label="名称" className="template-editor-field--full">
                   <Input
                     className="admin-input h-9"
+                    maxLength={128}
+                    required
                     value={form.name}
                     onChange={(e) => onChange({ name: e.target.value })}
                   />
@@ -194,6 +205,7 @@ export function TemplateEditorDialog({
                   <Input
                     className="admin-input h-9"
                     type="number"
+                    step={1}
                     value={form.sort_order}
                     onChange={(e) => onChange({ sort_order: Number(e.target.value) })}
                   />
@@ -202,6 +214,8 @@ export function TemplateEditorDialog({
                   <Input
                     className="admin-input h-9"
                     type="number"
+                    min={1}
+                    step={1}
                     value={form.shot_duration_min}
                     onChange={(e) => onChange({ shot_duration_min: Number(e.target.value) })}
                   />
@@ -210,6 +224,8 @@ export function TemplateEditorDialog({
                   <Input
                     className="admin-input h-9"
                     type="number"
+                    min={form.shot_duration_min || 1}
+                    step={1}
                     value={form.shot_duration_max}
                     onChange={(e) => onChange({ shot_duration_max: Number(e.target.value) })}
                   />
@@ -300,7 +316,7 @@ export function TemplateEditorDialog({
                 ) : null}
               </div>
             ) : null}
-          </div>
+          </fieldset>
         </div>
       </div>
     </AdminModal>

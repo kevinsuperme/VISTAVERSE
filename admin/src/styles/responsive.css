@@ -1,0 +1,195 @@
+@media (max-width: 900px) {
+  .admin-app.is-collapsed {
+    --admin-sidebar-w: 72px;
+  }
+  .admin-app.is-collapsed .admin-brand-name,
+  .admin-app.is-collapsed .admin-brand-sub,
+  .admin-app.is-collapsed .admin-nav-group-label,
+  .admin-app.is-collapsed .admin-nav-item span,
+  .admin-app.is-collapsed .admin-user-card .min-w-0 {
+    display: none;
+  }
+}
+
+/* Narrow screens use the navigation as an off-canvas drawer so list and
+   detail pages keep a readable content width. */
+.admin-mobile-scrim {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .admin-app {
+    --admin-sidebar-w: 232px;
+  }
+
+  .admin-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(86vw, 280px);
+    transform: translateX(-102%);
+    transition: transform 0.22s ease;
+  }
+
+  .admin-app.is-mobile-open .admin-sidebar {
+    transform: translateX(0);
+  }
+
+  .admin-app.is-collapsed .admin-brand-name,
+  .admin-app.is-collapsed .admin-brand-sub,
+  .admin-app.is-collapsed .admin-nav-group-label,
+  .admin-app.is-collapsed .admin-nav-item span,
+  .admin-app.is-collapsed .admin-user-card .min-w-0 {
+    display: block;
+  }
+
+  .admin-mobile-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: block;
+    border: 0;
+    padding: 0;
+    background: rgba(15, 23, 42, 0.42);
+    cursor: pointer;
+  }
+
+  .admin-main {
+    width: 100%;
+  }
+
+  .admin-topbar {
+    z-index: 40;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-sidebar {
+    transition: none;
+  }
+}
+
+/* Final interaction and responsive pass: keep focus visible, touch targets
+   comfortable, and dense admin tables usable on narrow screens. */
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--admin-accent-ring, rgba(31, 92, 72, 0.32));
+  outline-offset: 2px;
+}
+
+.admin-icon-btn {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.admin-nav-item {
+  min-height: 44px;
+}
+
+@media (max-width: 900px) {
+  .admin-content {
+    padding: 14px 14px 22px;
+  }
+
+  .admin-topbar {
+    padding-inline: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-topbar {
+    height: 56px;
+  }
+
+  .admin-topbar-crumb {
+    display: none;
+  }
+
+  .admin-list-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-filter-bar,
+  .admin-filter-panel {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .admin-filter-bar-main,
+  .admin-filter-panel-main,
+  .admin-filter-bar-trailing,
+  .admin-filter-panel-trailing {
+    width: 100%;
+  }
+
+  .admin-filter-bar .admin-filter-search,
+  .admin-filter-panel .admin-filter-search,
+  .admin-filter-bar .admin-input-search-wrap,
+  .admin-filter-panel .admin-input-search-wrap,
+  .admin-filter-bar .admin-user-search,
+  .admin-filter-panel .admin-user-search {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .admin-filter-bar .admin-control,
+  .admin-filter-bar .admin-select,
+  .admin-filter-bar .admin-input,
+  .admin-filter-bar select,
+  .admin-filter-panel .admin-control,
+  .admin-filter-panel .admin-select,
+  .admin-filter-panel .admin-input,
+  .admin-filter-panel select {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+  }
+
+  .admin-data-table {
+    border-radius: 10px;
+  }
+
+  .admin-filter-inline {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .admin-filter-inline > :not(.admin-filter-inline-label) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .admin-date-range {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-pagination [role="group"] {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .admin-pagination [role="group"] > * {
+    flex-shrink: 0;
+  }
+
+  .admin-page-header {
+    align-items: stretch;
+  }
+
+  .admin-page-header > .flex {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

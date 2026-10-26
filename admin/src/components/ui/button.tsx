@@ -20,10 +20,10 @@ const buttonVariants = cva(
         soft: "bg-[var(--admin-accent-soft)] text-[var(--admin-forest)] hover:bg-[rgba(61,154,114,0.18)]",
       },
       size: {
-        default: "h-9 px-4",
-        sm: "h-8 rounded-[9px] px-3 text-xs",
-        lg: "h-10 rounded-[10px] px-6",
-        icon: "h-9 w-9",
+        default: "h-10 px-4",
+        sm: "h-10 rounded-[9px] px-3 text-xs",
+        lg: "h-11 rounded-[10px] px-6",
+        icon: "h-10 w-10",
       },
     },
     defaultVariants: {

@@ -1,7 +1,6 @@
 # Admin template CRUD
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import cast, func, or_, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -14,6 +13,9 @@ from app.schemas import (
     AdminTemplatePatch,
     PageMeta,
 )
+from app.schemas_admin import AdminTemplateBulk
+from app.services.admin.audit import record_audit
+from app.services.admin.exports import EXPORT_LIMIT, csv_response, template_filters
 
 router = APIRouter()
 
@@ -25,14 +27,15 @@ async def templates_meta(
 ) -> dict:
     # 汇总全库分类标签（用于管理端筛选）
     result = await db.execute(select(Template.category))
-    categories: set[str] = set()
+    counts: dict[str, int] = {}
     for (cat_list,) in result.all():
         if not isinstance(cat_list, list):
             continue
-        for item in cat_list:
+        for item in set(item.strip() for item in cat_list if isinstance(item, str)):
             if isinstance(item, str) and item.strip():
-                categories.add(item.strip())
-    return {"categories": sorted(categories)}
+                counts[item] = counts.get(item, 0) + 1
+    total = int((await db.scalar(select(func.count()).select_from(Template))) or 0)
+    return {"categories": sorted(counts), "category_counts": counts, "total": total}
 
 
 @router.get("/templates", response_model=AdminTemplateListOut)
@@ -42,25 +45,16 @@ async def list_templates(
     q: str | None = None,
     is_active: bool | None = None,
     category: str | None = None,
+    is_premium: bool | None = None,
     _admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminTemplateListOut:
     # All templates including inactive
     stmt = select(Template)
     count_stmt = select(func.count()).select_from(Template)
-    if q and q.strip():
-        like = f"%{q.strip()}%"
-        filt = or_(Template.id.ilike(like), Template.name.ilike(like), Template.description.ilike(like))
-        stmt = stmt.where(filt)
-        count_stmt = count_stmt.where(filt)
-    if is_active is not None:
-        stmt = stmt.where(Template.is_active == is_active)
-        count_stmt = count_stmt.where(Template.is_active == is_active)
-    if category and category.strip():
-        cat = category.strip()
-        cat_filter = cast(Template.category, JSONB).contains([cat])
-        stmt = stmt.where(cat_filter)
-        count_stmt = count_stmt.where(cat_filter)
+    conditions = template_filters(q, is_active, category, is_premium)
+    stmt = stmt.where(*conditions)
+    count_stmt = count_stmt.where(*conditions)
 
     total = int((await db.execute(count_stmt)).scalar_one() or 0)
     result = await db.execute(
@@ -72,6 +66,37 @@ async def list_templates(
     return AdminTemplateListOut(
         items=items, meta=PageMeta(page=page, page_size=page_size, total=total)
     )
+
+
+@router.get("/templates/export")
+async def export_templates(
+    q: str | None = None, is_active: bool | None = None, category: str | None = None,
+    is_premium: bool | None = None, _admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_db),
+):
+    """导出筛选后的模板概览，不包含模型配置内容。"""
+    rows = (await db.execute(select(Template).where(*template_filters(q, is_active, category, is_premium))
+                            .order_by(Template.sort_order, Template.id).limit(EXPORT_LIMIT + 1))).scalars().all()
+    return csv_response("templates.csv", ["ID", "名称", "分类", "已上架", "Premium", "排序"],
+                        ((t.id, t.name, ",".join(t.category or []), t.is_active, t.is_premium, t.sort_order) for t in rows))
+
+
+@router.post("/templates/bulk")
+async def bulk_templates(body: AdminTemplateBulk, _admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_db)) -> dict:
+    """批量上下架并返回每项结果，全部成功项与审计同事务提交。"""
+    rows = (await db.execute(select(Template).where(Template.id.in_(body.ids)).order_by(Template.id).with_for_update())).scalars().all()
+    by_id = {template.id: template for template in rows}
+    results = []
+    for template_id in body.ids:
+        template = by_id.get(template_id)
+        if template is None:
+            results.append({"id": template_id, "success": False, "error": "模板不存在"})
+            continue
+        record_audit(db, _admin, "template.update", "template", template_id,
+                     {"is_active": {"before": template.is_active, "after": body.is_active}})
+        template.is_active = body.is_active
+        results.append({"id": template_id, "success": True})
+    await db.commit()
+    return {"results": results, "succeeded": len(rows), "failed": len(body.ids) - len(rows)}
 
 
 @router.get("/templates/{template_id}", response_model=AdminTemplateOut)
@@ -98,6 +123,7 @@ async def create_template(
         raise HTTPException(status_code=400, detail="模板 ID 已存在")
     tpl = Template(**body.model_dump())
     db.add(tpl)
+    record_audit(db, _admin, "template.create", "template", body.id, {"fields": sorted(body.model_dump())})
     await db.commit()
     await db.refresh(tpl)
     return AdminTemplateOut.model_validate(tpl)
@@ -111,12 +137,19 @@ async def patch_template(
     db: AsyncSession = Depends(get_db),
 ) -> AdminTemplateOut:
     # Partial update including is_active / is_premium
-    tpl = await db.get(Template, template_id)
+    tpl = (await db.execute(select(Template).where(Template.id == template_id).with_for_update())).scalar_one_or_none()
     if not tpl:
         raise HTTPException(status_code=404, detail="模板不存在")
     data = body.model_dump(exclude_unset=True)
+    if any(value is None for value in data.values()):
+        raise HTTPException(status_code=400, detail="模板字段不能为 null")
+    # 配置 JSON 可能包含供应商参数；只记录字段名称和公开状态。
+    changes = {key: {"before": getattr(tpl, key), "after": data[key]}
+               for key in ("is_active", "is_premium", "sort_order", "name") if key in data}
+    changes["fields"] = sorted(data)
     for key, value in data.items():
         setattr(tpl, key, value)
+    record_audit(db, _admin, "template.update", "template", template_id, changes)
     await db.commit()
     await db.refresh(tpl)
     return AdminTemplateOut.model_validate(tpl)
@@ -143,5 +176,6 @@ async def delete_template(
     if used > 0:
         raise HTTPException(status_code=400, detail=f"模板仍被 {used} 个项目引用，无法删除")
     await db.delete(tpl)
+    record_audit(db, _admin, "template.delete", "template", template_id, {"name": tpl.name})
     await db.commit()
     return {"ok": True}

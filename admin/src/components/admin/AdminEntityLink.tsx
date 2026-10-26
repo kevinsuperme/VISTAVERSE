@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { formatAccountId } from "@/lib/admin-account";
+import { hasPermission } from "@/lib/permissions";
 
 type EntityKind = "user" | "project" | "drama" | "drama_asset" | "task" | "order";
 
@@ -52,6 +53,8 @@ function defaultLabel(kind: EntityKind, id: number): string {
 /** 跨页实体跳转链接 */
 export function AdminEntityLink({ kind, id, label, className }: AdminEntityLinkProps) {
   if (!id) return <span className="text-[var(--admin-muted)]">—</span>;
+  const permission = kind === "user" ? "users:read" : kind === "order" ? "orders:read" : kind === "task" ? "tasks:read" : "content:read";
+  if (!hasPermission(permission)) return <span className={className}>{label ?? defaultLabel(kind, id)}</span>;
   return (
     <Link to={buildHref(kind, id)} className={cn("admin-link font-medium", className)}>
       {label ?? defaultLabel(kind, id)}

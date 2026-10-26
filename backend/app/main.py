@@ -228,6 +228,9 @@ async def _pg_columns(conn, table: str) -> set[str]:
 
 async def _apply_schema_patches_unlocked(conn) -> None:
     """Lightweight additive migrations（仅 PostgreSQL）。"""
+    await conn.execute(text("ALTER TABLE works ADD COLUMN IF NOT EXISTS audit_reason VARCHAR(500) NOT NULL DEFAULT ''"))
+    await conn.execute(text("ALTER TABLE works ADD COLUMN IF NOT EXISTS audited_by INTEGER"))
+    await conn.execute(text("ALTER TABLE works ADD COLUMN IF NOT EXISTS audited_at TIMESTAMPTZ"))
     scols = await _pg_columns(conn, "shots")
     if "segment_script" not in scols:
         await conn.execute(text("ALTER TABLE shots ADD COLUMN segment_script TEXT DEFAULT ''"))
@@ -338,7 +341,7 @@ async def _apply_schema_patches_unlocked(conn) -> None:
         await conn.execute(text(f"DROP INDEX IF EXISTS ix_task_runs_{col}"))
         await conn.execute(text(f"ALTER TABLE task_runs DROP COLUMN {col}"))
 
-_SCHEMA_MIGRATION_VERSION = 1
+_SCHEMA_MIGRATION_VERSION = 2
 _SCHEMA_MIGRATION_LOCK_KEY = "printfilm.schema.migrations"
 
 

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
 import type { AdminLedger, PageResult } from "@/api/client";
 import { listAdminLedger } from "@/api/finance";
 import { AdminDateRangeFilter } from "@/components/admin/AdminDateRangeFilter";
@@ -26,39 +28,34 @@ function directionLabel(deltaFen: number): string {
 
 /** 管理端手动调账记录：仅展示 ref_type=admin 的钱包流水 */
 export function AdjustRecordsPage() {
-  const [userId, setUserId] = useState<number | null>(null);
-  const [direction, setDirection] = useState<DirectionFilter>("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<LedgerRes | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(
-    async (nextPage = page) => {
-      setLoading(true);
-      try {
-        // 后台写流水：调减 kind=adjust，调增 kind=grant。
-        setData(await listAdminLedger(nextPage, {
-          refType: "admin",
-          userId,
-          kind: direction === "credit" ? "grant" : direction === "debit" ? "adjust" : "",
-          dateFrom,
-          dateTo,
-        }));
-      } catch (err) {
-        setData(null);
-        toast.error(err instanceof Error ? err.message : "加载调账记录失败");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [page, userId, direction, dateFrom, dateTo],
-  );
-
-  useEffect(() => {
-    void load(page);
-  }, [load, page]);
+  const [params, setParams] = useSearchParams();
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const appliedUser = Number(params.get("user_id")) || null;
+  const appliedDirection = params.get("direction") || "";
+  const appliedFrom = params.get("from") || "";
+  const appliedTo = params.get("to") || "";
+  const [userId, setUserId] = useState<number | null>(appliedUser);
+  const [direction, setDirection] = useState<DirectionFilter>(appliedDirection as DirectionFilter);
+  const [dateFrom, setDateFrom] = useState(appliedFrom);
+  const [dateTo, setDateTo] = useState(appliedTo);
+  const { data, loading, error, run } = useAdminRequest<LedgerRes>();
+  const load = useCallback(() => run(() => listAdminLedger(page, {
+    refType: "admin", userId: appliedUser,
+    kind: appliedDirection === "credit" ? "grant" : appliedDirection === "debit" ? "adjust" : "",
+    dateFrom: appliedFrom, dateTo: appliedTo,
+  })), [run, page, appliedUser, appliedDirection, appliedFrom, appliedTo]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setUserId(appliedUser); setDirection(appliedDirection as DirectionFilter); setDateFrom(appliedFrom); setDateTo(appliedTo); }, [appliedUser, appliedDirection, appliedFrom, appliedTo]);
+  function applyFilters() {
+    if (dateFrom && dateTo && dateFrom > dateTo) return;
+    const next = new URLSearchParams();
+    if (userId) next.set("user_id", String(userId));
+    if (direction) next.set("direction", direction);
+    if (dateFrom) next.set("from", dateFrom);
+    if (dateTo) next.set("to", dateTo);
+    if (next.toString() === params.toString()) void load();
+    else setParams(next, { replace: true });
+  }
 
   const rows = data?.items ?? [];
 
@@ -69,6 +66,7 @@ export function AdjustRecordsPage() {
       <AdminFilterBar>
         <AdminUserSearchSelect value={userId} onChange={setUserId} />
         <Select
+          aria-label="调账方向"
           value={direction}
           onChange={(e) => setDirection(e.target.value as DirectionFilter)}
         >
@@ -88,14 +86,13 @@ export function AdjustRecordsPage() {
           size="sm"
           variant="secondary"
           className="admin-filter-action"
-          onClick={() => {
-            setPage(1);
-            void load(1);
-          }}
+          disabled={Boolean(dateFrom && dateTo && dateFrom > dateTo)}
+          onClick={applyFilters}
         >
           筛选
         </Button>
       </AdminFilterBar>
+      {dateFrom && dateTo && dateFrom > dateTo ? <p role="alert">开始日期不能晚于结束日期</p> : null}
 
       <PageSection
         title="手动调账记录"
@@ -123,7 +120,7 @@ export function AdjustRecordsPage() {
                     加载中…
                   </TableCell>
                 </TableRow>
-              ) : rows.length === 0 ? (
+              ) : error ? <TableRow><TableCell colSpan={8}><div role="alert">{error}<Button size="sm" variant="outline" onClick={() => void load()}>重新加载</Button></div></TableCell></TableRow> : rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="!text-center text-[var(--admin-muted)]">
                     暂无手动调账记录
@@ -173,7 +170,7 @@ export function AdjustRecordsPage() {
             page={data.meta.page}
             pageSize={data.meta.page_size}
             total={data.meta.total}
-            onPageChange={setPage}
+            onPageChange={(next) => setPage(next)}
           />
         ) : null}
       </PageSection>

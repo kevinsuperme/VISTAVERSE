@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -16,23 +16,22 @@ import {
 import { toast } from "sonner";
 import { PageSection } from "@/components/admin/PageSection";
 import { PageHeader } from "@/components/ui/page";
-import { api, type AdminOrder, type AdminStats, type AdminUpstreamUsage, type PageMeta } from "@/api/client";
+import { api } from "@/api/client";
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { hasPermission } from "@/lib/permissions";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
 import { fenToYuan } from "@/lib/utils";
 import { projectStatusLabel, taskDomainLabel } from "@/lib/statusLabels";
 import { Button } from "@/components/ui/button";
 import {
-  buildStatsQuery,
   dashboardRangeLabel,
   DashboardFilters,
-  DEFAULT_DASHBOARD_FILTERS,
   PROJECTS_DASHBOARD_FILTERS,
-  type DashboardFilterState,
 } from "@/pages/dashboard/DashboardFilters";
 import { DashboardKpiCard } from "@/pages/dashboard/DashboardKpiCard";
 import { DashboardInsightGrid } from "@/pages/dashboard/DashboardInsightGrid";
 import { DashboardPeriodKpis } from "@/pages/dashboard/DashboardPeriodKpis";
-import { DashboardSectionTabs, type DashboardSection } from "@/pages/dashboard/DashboardSectionTabs";
+import { DashboardSectionTabs } from "@/pages/dashboard/DashboardSectionTabs";
 import { buildDomainInsights } from "@/pages/dashboard/dashboardInsightMaps";
 import { buildFinanceInsights, buildProjectInsights } from "@/pages/dashboard/dashboardSectionInsights";
 import { sumDailyUsage } from "@/pages/dashboard/dashboardMetrics";
@@ -40,7 +39,6 @@ import { UsageDistributionChart } from "@/pages/dashboard/UsageDistributionChart
 import { TopUsersRankingChart } from "@/pages/dashboard/TopUsersRankingChart";
 import { UsageTrendChart } from "@/pages/dashboard/UsageTrendChart";
 
-type OrderRes = { items: AdminOrder[]; meta: PageMeta };
 
 const CAPABILITY_LABELS: Record<string, string> = {
   llm: "LLM 文本",
@@ -71,64 +69,25 @@ function domainChartLabel(key: string): string {
 
 /** 管理端仪表盘：板块切换 + 渐变 KPI + 可筛选用量图表 */
 export function DashboardPage() {
-  const [section, setSection] = useState<DashboardSection>("overview");
-  const [filters, setFilters] = useState<DashboardFilterState>(DEFAULT_DASHBOARD_FILTERS);
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [orders, setOrders] = useState<AdminOrder[]>([]);
-  const [upstreamUsage, setUpstreamUsage] = useState<AdminUpstreamUsage | null>(null);
+  const { section, setSection, filters, setFilters, statsRequest, orderRequest, upstreamRequest, updatedAt, loadStats, loadOrders, loadUpstream } = useDashboardData();
+  const { data: loadedStats, loading, error } = statsRequest;
+  const stats = loading || error ? null : loadedStats;
+  const orders = orderRequest.data?.items ?? [];
+  const upstreamUsage = upstreamRequest.data;
   const [upstreamSyncing, setUpstreamSyncing] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  const loadUpstreamUsage = useCallback(async () => {
-    try {
-      const data = await api<AdminUpstreamUsage>("/api/admin/stats/upstream-usage?days=30");
-      setUpstreamUsage(data);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "官方用量加载失败");
-    }
-  }, []);
-
-  const syncUpstreamUsage = useCallback(async () => {
+  async function syncUpstreamUsage() {
+    if (upstreamSyncing) return;
     setUpstreamSyncing(true);
     try {
       await api("/api/admin/stats/upstream-usage/sync?days=30", { method: "POST" });
-      toast.success("官方用量已刷新");
-      await loadUpstreamUsage();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "刷新失败");
-    } finally {
-      setUpstreamSyncing(false);
-    }
-  }, [loadUpstreamUsage]);
-
-  const loadData = useCallback(async (nextFilters: DashboardFilterState) => {
-    setLoading(true);
-    try {
-      const [s, o] = await Promise.all([
-        api<AdminStats>(buildStatsQuery(nextFilters)),
-        api<OrderRes>("/api/admin/orders?page=1&page_size=8&status=paid"),
-      ]);
-      setStats(s);
-      setOrders(o.items);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const kpiReady = Boolean(stats);
+      await loadUpstream();
+      toast.success("官方用量同步请求已完成");
+    } catch (err) { toast.error(err instanceof Error ? err.message : "同步失败"); }
+    finally { setUpstreamSyncing(false); }
+  }
+  const kpiReady = Boolean(stats) && !loading && !error;
   const kpiPlaceholder = loading ? "…" : "—";
-  const statsFilters = section === "projects" ? PROJECTS_DASHBOARD_FILTERS : filters;
   const projectsRangeLabel = dashboardRangeLabel(PROJECTS_DASHBOARD_FILTERS.days);
-
-  useEffect(() => {
-    void loadData(statsFilters);
-  }, [statsFilters, loadData]);
-
-  useEffect(() => {
-    void loadUpstreamUsage();
-  }, [loadUpstreamUsage]);
 
   const statusEntries = Object.entries(stats?.project_status_counts ?? {}).sort((a, b) => b[1] - a[1]);
   const daily = stats?.daily_usage ?? [];
@@ -146,6 +105,8 @@ export function DashboardPage() {
   return (
     <div className="admin-page admin-dashboard-page">
       <PageHeader description="用户、充值、AI 调用与费用概览" />
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-[var(--admin-muted)]"><span>{loading ? "统计加载中…" : error ? "统计尚未更新" : updatedAt ? `数据更新于 ${updatedAt}` : "等待更新"}</span><Button variant="outline" size="sm" disabled={loading} onClick={() => void loadStats()}>刷新统计</Button></div>
+      {error ? <div role="alert" className="admin-panel p-4">统计加载失败：{error}。请点击刷新统计重试。</div> : null}
 
       <div className="admin-dashboard-kpi-grid">
         <DashboardKpiCard
@@ -331,7 +292,7 @@ export function DashboardPage() {
                 : "未配置 TokenFree API Key，请在「系统设置 → 模型」填写后刷新官方数据"
             }
             actions={
-              upstreamUsage?.configured ? (
+              upstreamUsage?.configured && hasPermission("finance:write") ? (
                 <Button type="button" size="sm" variant="outline" disabled={upstreamSyncing} onClick={() => void syncUpstreamUsage()}>
                   {upstreamSyncing ? "刷新中…" : "刷新官方数据"}
                 </Button>
@@ -353,7 +314,7 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(upstreamUsage?.series ?? []).length === 0 ? (
+                  {upstreamRequest.loading ? <tr><td colSpan={6} role="status">官方用量加载中…</td></tr> : upstreamRequest.error ? <tr><td colSpan={6}><div role="alert">{upstreamRequest.error}<Button variant="outline" size="sm" onClick={() => void loadUpstream()}>重试官方用量</Button></div></td></tr> : (upstreamUsage?.series ?? []).length === 0 ? (
                     <tr>
                       <td colSpan={6} className="!text-center text-[var(--admin-muted)]">
                         暂无对照数据
@@ -401,7 +362,7 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.length === 0 ? (
+                  {orderRequest.loading ? <tr><td colSpan={3} role="status">订单加载中…</td></tr> : orderRequest.error ? <tr><td colSpan={3}><div role="alert">{orderRequest.error}<Button variant="outline" size="sm" onClick={() => void loadOrders()}>重试订单</Button></div></td></tr> : orders.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="!text-center text-[var(--admin-muted)]">
                         暂无已支付订单
@@ -493,38 +454,38 @@ export function DashboardPage() {
 
           <PageSection title="快捷入口" bodyClassName="!pt-2" className="admin-dashboard-glass">
             <div className="admin-dashboard-tools">
-              <Link to="/templates" className="admin-dashboard-tool-btn">
+              {hasPermission("templates:read") && <Link to="/templates" className="admin-dashboard-tool-btn">
                 <Shapes className="h-5 w-5" />
                 <span>模板管理</span>
-              </Link>
-              <Link to="/orders?tab=usage" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("finance:read") && <Link to="/orders?tab=usage" className="admin-dashboard-tool-btn">
                 <Receipt className="h-5 w-5" />
                 <span>订单用量</span>
-              </Link>
-              <Link to="/users" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("users:read") && <Link to="/users" className="admin-dashboard-tool-btn">
                 <Users className="h-5 w-5" />
                 <span>用户管理</span>
-              </Link>
-              <Link to="/projects" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("content:read") && <Link to="/projects" className="admin-dashboard-tool-btn">
                 <Clapperboard className="h-5 w-5" />
                 <span>AI短视频</span>
-              </Link>
-              <Link to="/drama-projects" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("content:read") && <Link to="/drama-projects" className="admin-dashboard-tool-btn">
                 <Film className="h-5 w-5" />
                 <span>漫剧项目</span>
-              </Link>
-              <Link to="/queues" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("tasks:read") && <Link to="/queues" className="admin-dashboard-tool-btn">
                 <Layers className="h-5 w-5" />
                 <span>任务队列</span>
-              </Link>
-              <Link to="/settings" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("settings:read") && <Link to="/settings" className="admin-dashboard-tool-btn">
                 <Settings className="h-5 w-5" />
                 <span>系统配置</span>
-              </Link>
-              <Link to="/orders" className="admin-dashboard-tool-btn">
+              </Link>}
+              {hasPermission("orders:read") && <Link to="/orders" className="admin-dashboard-tool-btn">
                 <Activity className="h-5 w-5" />
                 <span>财务流水</span>
-              </Link>
+              </Link>}
             </div>
           </PageSection>
         </>

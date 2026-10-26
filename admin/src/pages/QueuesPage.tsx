@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Ban, Layers, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AdminTaskListRes, type AdminTaskRow, type AdminTaskStats } from "@/api/client";
 import { AdminSearchInput } from "@/components/admin/AdminSearchInput";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { AdminConfirmDialog } from "@/components/admin/AdminConfirmDialog";
 import { AdminUserSearchSelect } from "@/components/admin/AdminUserSearchSelect";
 import { StatCard } from "@/components/admin/StatCard";
 import { PageSection } from "@/components/admin/PageSection";
@@ -16,6 +19,7 @@ import { canCancelTask, taskBilling, taskUpstream } from "@/lib/taskObservabilit
 import { cn } from "@/lib/utils";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { taskDomainLabel, taskTypeLabel } from "@/lib/statusLabels";
+import { hasPermission } from "@/lib/permissions";
 
 const REFRESH_MS = 15000;
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
@@ -45,28 +49,43 @@ export function QueuesPage() {
   const [data, setData] = useState<AdminTaskListRes | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [q, setQ] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [domain, setDomain] = useState("");
-  const [status, setStatus] = useState("");
-  const [filterUserId, setFilterUserId] = useState<number | null>(null);
-  const [taskType, setTaskType] = useState("");
-  const [viewTab, setViewTab] = useState<"all" | "active">("all");
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const [pageSize, setPageSize] = useAdminUrlState<number>("page_size", DEFAULT_PAGE_SIZE);
+  const [q, setQ] = useAdminUrlState<string>("q", "");
+  const [searchInput, setSearchInput] = useState(q);
+  const [domain, setDomain] = useAdminUrlState<string>("domain", "");
+  const [status, setStatus] = useAdminUrlState<string>("status", "");
+  const [filterUserId, setFilterUserId] = useAdminUrlState<number | null>("user_id", null);
+  const [taskType, setTaskType] = useAdminUrlState<string>("task_type", "");
+  const [viewTab, setViewTab] = useAdminUrlState<"all" | "active">("view", "all");
   const [cancelLoading, setCancelLoading] = useState<number | null>(null);
+  const [cancelCandidate, setCancelCandidate] = useState<AdminTaskRow | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelLock = useRef(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const taskSequence = useRef(0);
+  const statsSequence = useRef(0);
+  const canWriteTasks = hasPermission("tasks:write");
   const apiOnlyNode = stats?.scheduler === "disabled";
   const taskDetail = useAdminDetailQuery("task");
   const taskViews = useMemo(() => (data?.items || []).map((task) => ({ task, upstream: taskUpstream(task), billing: taskBilling(task) })), [data]);
   const now = useTaskClock(data?.items.some((task) => !TERMINAL_STATUSES.has(task.status)) ?? false);
 
   const loadStats = useCallback(async () => {
-    const res = await api<AdminTaskStats>("/api/admin/tasks/stats");
-    setStats(res);
+    const current = ++statsSequence.current;
+    try {
+      const res = await api<AdminTaskStats>("/api/admin/tasks/stats");
+      if (current === statsSequence.current) { setStats(res); setStatsError(null); }
+    } catch (cause) {
+      if (current === statsSequence.current) setStatsError(cause instanceof Error ? cause.message : "运行统计加载失败");
+    }
   }, []);
 
   const loadTasks = useCallback(
     async (silent = false) => {
+      const current = ++taskSequence.current;
       if (!silent) setRefreshing(true);
       try {
         const params = new URLSearchParams({
@@ -80,14 +99,14 @@ export function QueuesPage() {
         if (q.trim()) params.set("q", q.trim());
         if (viewTab === "active" && !status) params.set("active_only", "true");
         const res = await api<AdminTaskListRes>(`/api/admin/tasks?${params}`);
-        setData(res);
+        if (current === taskSequence.current) { setData(res); setListError(null); }
       } catch (err) {
-        if (!silent) {
+        if (current === taskSequence.current) setListError(err instanceof Error ? err.message : "加载任务失败");
+        if (!silent && current === taskSequence.current) {
           toast.error(err instanceof Error ? err.message : "加载任务失败");
         }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (current === taskSequence.current) { setLoading(false); setRefreshing(false); }
       }
     },
     [domain, filterUserId, page, pageSize, q, status, taskType, viewTab],
@@ -95,27 +114,23 @@ export function QueuesPage() {
 
   const refreshAll = useCallback(
     async (silent = false) => {
-      if (!silent) setRefreshing(true);
-      try {
-        await Promise.all([loadStats(), loadTasks(true)]);
-      } catch (err) {
-        if (!silent) toast.error(err instanceof Error ? err.message : "刷新失败");
-      } finally {
-        setRefreshing(false);
-        setLoading(false);
-      }
+      await Promise.all([loadStats(), loadTasks(silent)]);
     },
     [loadStats, loadTasks],
   );
+
+  useEffect(() => () => { taskSequence.current += 1; statsSequence.current += 1; }, []);
+  useEffect(() => { setSearchInput(q); }, [q]);
 
   useEffect(() => {
     void refreshAll();
   }, [page, pageSize, domain, status, q, viewTab, filterUserId, taskType, refreshAll]);
 
   useEffect(() => {
+    if (!autoRefresh || cancelCandidate || cancelLoading !== null) return;
     const timer = window.setInterval(() => void refreshAll(true), REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [refreshAll]);
+  }, [refreshAll, autoRefresh, cancelCandidate, cancelLoading]);
 
   function openDetail(taskId: number) {
     taskDetail.open(taskId);
@@ -123,20 +138,24 @@ export function QueuesPage() {
 
   const handleCancel = useCallback(
     async (task: AdminTaskRow) => {
-      if (!canCancelTask(task)) return;
-      if (!window.confirm(`确定取消任务 #${task.id}（${taskTypeLabel(task.task_type)}）？`)) return;
+      if (!canWriteTasks || !canCancelTask(task) || cancelLock.current) return;
+      cancelLock.current = true;
+      setCancelError(null);
       setCancelLoading(task.id);
       try {
         await api(`/api/admin/tasks/${task.id}/cancel`, { method: "POST" });
         toast.success("已提交取消请求");
+        setCancelCandidate(null);
         await refreshAll(true);
       } catch (err) {
+        setCancelError(err instanceof Error ? err.message : "取消失败，请重试");
         toast.error(err instanceof Error ? err.message : "取消失败");
       } finally {
+        cancelLock.current = false;
         setCancelLoading(null);
       }
     },
-    [refreshAll],
+    [refreshAll, canWriteTasks],
   );
 
   const domainOptions = useMemo(() => {
@@ -149,7 +168,7 @@ export function QueuesPage() {
       <PageHeader
         description={`统一任务平台 · 自动刷新 ${REFRESH_MS / 1000}s · ${apiOnlyNode ? "本节点仅 API / 队列由执行节点处理" : `本节点并发 ${stats?.scheduler_running_jobs ?? 0}/${stats?.max_concurrency ?? 0}`}`}
         actions={
-          <button
+          <><button type="button" className="admin-btn admin-btn-secondary" aria-pressed={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>{autoRefresh ? "暂停自动刷新" : "恢复自动刷新"}</button><button
             type="button"
             className="admin-btn admin-btn-secondary"
             onClick={() => void refreshAll()}
@@ -157,9 +176,10 @@ export function QueuesPage() {
           >
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             刷新
-          </button>
+          </button></>
         }
       />
+      {statsError ? <div className="admin-empty admin-panel" role="alert"><p>运行统计加载失败：{statsError}</p><button type="button" className="admin-btn admin-btn-secondary" onClick={() => void refreshAll()}>重新加载</button></div> : null}
 
       {loading && !stats ? (
         <div className="admin-panel flex items-center justify-center py-16 text-[var(--admin-muted)]">
@@ -358,6 +378,7 @@ export function QueuesPage() {
               </button>
             </Toolbar>
 
+            <AdminListState loading={loading && !data} error={listError} empty={!data?.items.length} onRetry={() => void refreshAll()} emptyTitle="暂无匹配任务">
             <div className="admin-table-wrap">
               <table className="task-table">
                 <thead>
@@ -391,15 +412,16 @@ export function QueuesPage() {
                         now={now}
                         cancelling={cancelLoading === task.id}
                         onOpen={openDetail}
-                        onCancel={(row) => void handleCancel(row)}
+                        onCancel={canWriteTasks ? (row) => { setCancelError(null); setCancelCandidate(row); } : undefined}
                       />
                     ))
                   )}
                 </tbody>
               </table>
             </div>
+            </AdminListState>
 
-            {data?.meta ? (
+            {!listError && data?.meta ? (
               <PaginationBar
                 page={page}
                 pageSize={pageSize}
@@ -415,6 +437,7 @@ export function QueuesPage() {
         </>
       )}
 
+      <AdminConfirmDialog open={!!cancelCandidate} onOpenChange={(next) => { if (!next) setCancelCandidate(null); }} title={`取消任务 #${cancelCandidate?.id ?? ""}`} description={cancelError ? `取消失败：${cancelError}` : `确定取消${cancelCandidate ? taskTypeLabel(cancelCandidate.task_type) : ""}任务？已完成的上游调用可能仍产生费用，请核对计费记录。`} destructive confirmLabel="确认取消任务" loading={cancelLoading !== null} onConfirm={() => { if (cancelCandidate) void handleCancel(cancelCandidate); }} />
       <TaskDetailDialog
         taskId={taskDetail.id}
         open={taskDetail.isOpen}

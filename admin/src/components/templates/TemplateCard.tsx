@@ -9,6 +9,8 @@ type TemplateCardProps = {
   onDelete: (id: string) => void;
   onToggleActive: (id: string, value: boolean) => void;
   onTogglePremium: (id: string, value: boolean) => void;
+  canWrite?: boolean;
+  busy?: boolean;
 };
 
 // 解析封面 URL（相对 /static 走 Vite 代理）
@@ -26,6 +28,8 @@ export function TemplateCard({
   onDelete,
   onToggleActive,
   onTogglePremium,
+  canWrite = true,
+  busy = false,
 }: TemplateCardProps) {
   const src = coverSrc(template.preview_cover);
   const categories = template.category?.length ? template.category : ["未分类"];
@@ -41,7 +45,7 @@ export function TemplateCard({
         type="button"
         className="template-card-cover"
         onClick={() => onEdit(template)}
-        aria-label={`编辑模板 ${template.name}`}
+        aria-label={`${canWrite ? "编辑" : "查看"}模板 ${template.name}`}
       >
         {src ? (
           <img src={src} alt={template.name} loading="lazy" className="template-card-cover-img" />
@@ -72,17 +76,19 @@ export function TemplateCard({
             <p className="template-card-id">{template.id}</p>
           </div>
           <div className="template-card-actions">
-            <button type="button" className="template-card-icon-btn" onClick={() => onEdit(template)} title="编辑">
+            <button type="button" className="template-card-icon-btn" onClick={() => onEdit(template)} title={canWrite ? "编辑" : "详情"} aria-label={`${canWrite ? "编辑" : "查看"} ${template.name}`}>
               <Pencil className="h-4 w-4" />
             </button>
-            <button
+            {canWrite ? <button
               type="button"
               className="template-card-icon-btn template-card-icon-btn--danger"
               onClick={() => onDelete(template.id)}
               title="删除"
+              aria-label={`删除 ${template.name}`}
+              disabled={busy}
             >
               <Trash2 className="h-4 w-4" />
-            </button>
+            </button> : null}
           </div>
         </div>
 
@@ -106,6 +112,7 @@ export function TemplateCard({
             <span>上架</span>
             <Switch
               checked={template.is_active}
+              disabled={!canWrite || busy}
               onCheckedChange={(v) => onToggleActive(template.id, v)}
             />
           </label>
@@ -113,6 +120,7 @@ export function TemplateCard({
             <span>Premium</span>
             <Switch
               checked={template.is_premium}
+              disabled={!canWrite || busy}
               onCheckedChange={(v) => onTogglePremium(template.id, v)}
             />
           </label>

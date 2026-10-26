@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { toast } from "sonner";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
+import { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { api, type AdminDramaProject, type PageMeta } from "@/api/client";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
 import { AdminFilterBar } from "@/components/admin/AdminFilterBar";
 import { AdminUserSearchSelect } from "@/components/admin/AdminUserSearchSelect";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -16,24 +18,21 @@ type ListRes = { items: AdminDramaProject[]; meta: PageMeta };
 
 /** 漫剧项目列表：点击进入二级详情页 */
 export function DramaProjectsPage() {
-  const [page, setPage] = useState(1);
-  const [q, setQ] = useState("");
-  const [userId, setUserId] = useState<number | null>(null);
-  const [summaryStatus, setSummaryStatus] = useState("");
-  const [assetsSeedStatus, setAssetsSeedStatus] = useState("");
-  const [data, setData] = useState<ListRes | null>(null);
+  const location = useLocation();
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const [q, setQ] = useAdminUrlState<string>("q", "");
+  const [userId, setUserId] = useAdminUrlState<number | null>("user_id", null);
+  const [summaryStatus, setSummaryStatus] = useAdminUrlState<string>("summary_status", "");
+  const [assetsSeedStatus, setAssetsSeedStatus] = useAdminUrlState<string>("assets_seed_status", "");
+  const { data, loading, error, run } = useAdminRequest<ListRes>();
 
   async function load(nextPage = page) {
-    try {
-      const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
-      if (q.trim()) params.set("q", q.trim());
-      if (userId) params.set("user_id", String(userId));
-      if (summaryStatus.trim()) params.set("summary_status", summaryStatus.trim());
-      if (assetsSeedStatus.trim()) params.set("assets_seed_status", assetsSeedStatus.trim());
-      setData(await api<ListRes>(`/api/admin/drama-projects?${params}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    }
+  const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
+  if (q.trim()) params.set("q", q.trim());
+  if (userId) params.set("user_id", String(userId));
+  if (summaryStatus.trim()) params.set("summary_status", summaryStatus.trim());
+  if (assetsSeedStatus.trim()) params.set("assets_seed_status", assetsSeedStatus.trim());
+    await run(() => api<ListRes>(`/api/admin/drama-projects?${params}`));
   }
 
   useEffect(() => {
@@ -58,13 +57,14 @@ export function DramaProjectsPage() {
           variant="secondary"
           className="admin-filter-action"
           onClick={() => {
-            setPage(1);
-            void load(1);
+            if (page === 1) void load(1);
+            else setPage(1);
           }}
         >
           筛选
         </Button>
       </AdminFilterBar>
+      <AdminListState loading={loading} error={error} empty={!data?.items.length} onRetry={() => void load()}>
       <div className="admin-table-wrap">
         <table>
           <thead>
@@ -86,7 +86,7 @@ export function DramaProjectsPage() {
               <tr key={row.id}>
                 <td>{row.id}</td>
                 <td className="max-w-[200px] truncate">
-                  <Link to={`/drama-projects/${row.id}`} className="admin-link font-medium">
+                  <Link to={`/drama-projects/${row.id}`} state={{ from: `${location.pathname}${location.search}` }} className="admin-link font-medium">
                     {row.title}
                   </Link>
                 </td>
@@ -103,7 +103,7 @@ export function DramaProjectsPage() {
                 </td>
                 <td>
                   <Button size="sm" variant="outline" asChild>
-                    <Link to={`/drama-projects/${row.id}`}>详情</Link>
+                    <Link to={`/drama-projects/${row.id}`} state={{ from: `${location.pathname}${location.search}` }}>详情</Link>
                   </Button>
                 </td>
               </tr>
@@ -118,7 +118,8 @@ export function DramaProjectsPage() {
           </tbody>
         </table>
       </div>
-      {data?.meta ? (
+      </AdminListState>
+      {!loading && !error && data?.meta ? (
         <PaginationBar
           page={data.meta.page}
           pageSize={data.meta.page_size}

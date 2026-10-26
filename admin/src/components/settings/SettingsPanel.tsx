@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettingsSaveSlot } from "@/components/settings/SettingsSaveContext";
+import { hasPermission } from "@/lib/permissions";
+import { Button } from "@/components/ui/button";
 
 type PanelProps = {
   title: string;
@@ -33,16 +35,20 @@ type SettingsTabShellProps = {
   onSave?: () => void | Promise<void>;
   saving?: boolean;
   saveLabel?: string;
+  dirty?: boolean;
+  feedback?: string;
 };
 
 // Tab 内容区：把保存动作注册到页头，不再单独占一行工具条
-export function SettingsTabShell({ children, onSave, saving, saveLabel = "保存" }: SettingsTabShellProps) {
+export function SettingsTabShell({ children, onSave, saving, saveLabel = "保存", dirty = false, feedback = "" }: SettingsTabShellProps) {
   const { registerSave } = useSettingsSaveSlot();
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const hasSave = Boolean(onSave);
+  const canWrite = hasPermission("settings:write");
 
   useEffect(() => {
-    if (!onSave) {
+    if (!hasSave) {
       registerSave(null);
       return () => registerSave(null);
     }
@@ -50,15 +56,21 @@ export function SettingsTabShell({ children, onSave, saving, saveLabel = "保存
       onSave: () => onSaveRef.current?.(),
       saving,
       label: saveLabel,
+      dirty,
+      feedback,
     });
     return () => registerSave(null);
-  }, [onSave ? true : false, saving, saveLabel, registerSave]);
+  }, [hasSave, saving, saveLabel, dirty, feedback, registerSave]);
 
   return (
     <div className="settings-tab-shell">
-      <div className="settings-tab-body">{children}</div>
+      <fieldset disabled={!canWrite || saving} className="settings-tab-body min-w-0 border-0 p-0 m-0">{children}</fieldset>
     </div>
   );
+}
+
+export function SettingsError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return <div className="admin-empty" role="alert"><p>{error}</p><Button variant="outline" onClick={onRetry}>重新加载</Button></div>;
 }
 
 // 加载占位

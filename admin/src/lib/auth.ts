@@ -12,6 +12,7 @@ export type AdminUser = {
   role: string;
   plan: string;
   balance_fen: number;
+  permissions?: string[];
 };
 
 // Read stored JWT
@@ -48,5 +49,5 @@ export function setCachedUser(user: AdminUser): void {
 
 // Whether current cached user is admin
 export function isAdminUser(user: AdminUser | null): boolean {
-  return !!user && user.role === "admin";
+  return !!user && ["admin", "admin_readonly", "admin_operator", "admin_finance", "admin_reviewer"].includes(user.role);
 }

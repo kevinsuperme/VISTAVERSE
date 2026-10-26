@@ -4,6 +4,7 @@ import { api, type AdminRoutingSettings } from "@/api/client";
 import {
   LabeledControl,
   SettingsLoading,
+  SettingsError,
   SettingsPanel,
   SettingsSurface,
   SettingsTabShell,
@@ -19,6 +20,7 @@ import {
   type ModelCapability,
 } from "@/lib/tokenfreeRecommendedModels";
 import { cn } from "@/lib/utils";
+import { hasPermission } from "@/lib/permissions";
 
 const TOKENFREE_CHANNEL_ID = "tokenfree";
 const TOKENFREE_BASE_URL = "https://www.tokenfree.com/v1";
@@ -53,6 +55,10 @@ export function RoutingSettingsPanel() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [baseline, setBaseline] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const dirty = Boolean(apiKeyInput) || Boolean(data && JSON.stringify(data.default_models) !== baseline);
   const [defaultRemaps, setDefaultRemaps] = useState<
     Array<{ capability: ModelCapability; from: string; to: string }>
   >([]);
@@ -63,9 +69,11 @@ export function RoutingSettingsPanel() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await api<AdminRoutingSettings>("/api/admin/settings/routing");
       setDefaultRemaps(detectDefaultRemaps(res.default_models));
+      setBaseline(JSON.stringify(normalizeDefaults(res.default_models)));
       setData({
         ...res,
         default_models: normalizeDefaults(res.default_models),
@@ -77,7 +85,7 @@ export function RoutingSettingsPanel() {
       });
       setApiKeyInput("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载模型配置失败");
+      setError(err instanceof Error ? err.message : "加载模型配置失败");
     } finally {
       setLoading(false);
     }
@@ -90,6 +98,7 @@ export function RoutingSettingsPanel() {
   const readiness = buildReadiness(data, hasKey);
 
   function setDefaultModel(key: (typeof DEFAULT_KEYS)[number], value: string) {
+    setFeedback("");
     const cap = key.replace("_model", "") as ModelCapability;
     const next = clampDefaultToPreset(cap, value);
     setData((prev) =>
@@ -103,8 +112,9 @@ export function RoutingSettingsPanel() {
   }
 
   async function handleSave() {
-    if (!data) return;
+    if (!data || saving || !hasPermission("settings:write")) return;
     setSaving(true);
+    setFeedback("");
     try {
       const defaults = normalizeDefaults(data.default_models);
       const res = await api<{ settings: AdminRoutingSettings }>("/api/admin/settings/routing", {
@@ -131,10 +141,14 @@ export function RoutingSettingsPanel() {
         default_models: normalizeDefaults(res.settings.default_models),
       });
       setDefaultRemaps([]);
+      setBaseline(JSON.stringify(normalizeDefaults(res.settings.default_models)));
       setApiKeyInput("");
+      setFeedback(`模型配置已保存 · ${new Date().toLocaleTimeString()}`);
       toast.success("模型配置已保存");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "保存失败");
+      const message = err instanceof Error ? err.message : "保存失败";
+      setFeedback(`保存失败：${message}，修改与密钥输入已保留`);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -144,8 +158,10 @@ export function RoutingSettingsPanel() {
     return <SettingsLoading label="加载模型配置…" />;
   }
 
+  if (error && !data) return <SettingsError error={error} onRetry={() => void load()} />;
+
   return (
-    <SettingsTabShell onSave={() => void handleSave()} saving={saving} saveLabel="保存">
+    <SettingsTabShell onSave={handleSave} saving={saving} dirty={dirty} feedback={feedback} saveLabel="保存">
       <SettingsSurface className="settings-readiness-bar">
         <div className="settings-readiness-title">配置就绪</div>
         <div className="settings-readiness-row">
@@ -211,7 +227,7 @@ export function RoutingSettingsPanel() {
                 type="password"
                 placeholder={hasSavedKey ? "已保存，留空则不修改" : "粘贴 TokenFree API Key"}
                 value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
+                onChange={(e) => { setApiKeyInput(e.target.value); setFeedback(""); }}
               />
               {apiKeyInput ? (
                 <button

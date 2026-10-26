@@ -29,6 +29,7 @@ export function AdminConfirmDialog({
   return (
     <AdminModal
       open={open}
+      busy={loading}
       onOpenChange={onOpenChange}
       size="md"
       title={title}

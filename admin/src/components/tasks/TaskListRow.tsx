@@ -25,7 +25,7 @@ type TaskListRowProps = {
   now: number;
   cancelling: boolean;
   onOpen: (taskId: number) => void;
-  onCancel: (task: AdminTaskRow) => void;
+  onCancel?: (task: AdminTaskRow) => void;
 };
 
 // 待处理任务细分为待激活 / 延时等待 / 待调度
@@ -156,7 +156,7 @@ export function TaskListRow({ task, upstream, billing, now, cancelling, onOpen, 
           <button type="button" className="task-icon-btn" title="详情" aria-label="详情" onClick={() => onOpen(task.id)}>
             <Eye className="h-4 w-4" />
           </button>
-          {canCancelTask(task) ? (
+          {onCancel && canCancelTask(task) ? (
             <button type="button" className="task-icon-btn is-danger" title="取消任务" aria-label="取消任务" disabled={cancelling} onClick={() => onCancel(task)}>
               {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
             </button>

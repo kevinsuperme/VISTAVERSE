@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, type AdminStats, type AdminUserRow, type PageMeta } from "@/api/client";
 import { AdminField } from "@/components/admin/AdminField";
+import { AdminConfirmDialog } from "@/components/admin/AdminConfirmDialog";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
 import { AdminFilterBar } from "@/components/admin/AdminFilterBar";
 import { AdminListStats } from "@/components/admin/AdminListStats";
 import { AdminModal } from "@/components/admin/AdminModal";
@@ -18,19 +22,24 @@ import { useAdminDetailQuery } from "@/hooks/useAdminDetailQuery";
 import { formatAccountId } from "@/lib/admin-account";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { fenToYuan } from "@/lib/utils";
+import { ADMIN_ROLE_LABELS, hasPermission } from "@/lib/permissions";
+import { getCachedUser } from "@/lib/auth";
+import { buildBalanceAdjustment, createAdjustmentRequestId } from "@/lib/balanceAdjustment";
 
 type ListRes = { items: AdminUserRow[]; meta: PageMeta };
 
 // 用户管理：搜索、筛选、只读明细与编辑
 export function UsersPage() {
-  const [q, setQ] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [data, setData] = useState<ListRes | null>(null);
+  const [q, setQ] = useAdminUrlState<string>("q", "");
+  const [roleFilter, setRoleFilter] = useAdminUrlState<string>("role", "");
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const [pageSize, setPageSize] = useAdminUrlState<number>("page_size", DEFAULT_PAGE_SIZE);
+  const { data, loading, error, run } = useAdminRequest<ListRes>();
   const [stats, setStats] = useState<AdminStats | null>(null);
-  const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<AdminUserRow | null>(null);
+  const [editMode, setEditMode] = useState<"role" | "balance">("role");
+  const [confirming, setConfirming] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [detailUser, setDetailUser] = useState<AdminUserRow | null>(null);
   const [form, setForm] = useState({
     role: "user",
@@ -41,24 +50,15 @@ export function UsersPage() {
     balance_note: "",
   });
   const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const balanceRequestId = useRef("");
   const userDetail = useAdminDetailQuery("user");
 
   async function load(nextPage = page, nextQ = q, nextSize = pageSize) {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(nextPage),
-        page_size: String(nextSize),
-      });
-      if (nextQ.trim()) params.set("q", nextQ.trim());
-      if (roleFilter) params.set("role", roleFilter);
-      const res = await api<ListRes>(`/api/admin/users?${params}`);
-      setData(res);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
+    const params = new URLSearchParams({ page: String(nextPage), page_size: String(nextSize) });
+    if (nextQ.trim()) params.set("q", nextQ.trim());
+    if (roleFilter) params.set("role", roleFilter);
+    await run(() => api<ListRes>(`/api/admin/users?${params}`));
   }
 
   useEffect(() => {
@@ -81,8 +81,12 @@ export function UsersPage() {
     if (hit) setDetailUser(hit);
   }, [userDetail.id, data?.items]);
 
-  function openEdit(user: AdminUserRow) {
+  function openEdit(user: AdminUserRow, mode: "role" | "balance") {
+    balanceRequestId.current = createAdjustmentRequestId();
     setEditing(user);
+    setEditMode(mode);
+    setFormError(null);
+    setConfirming(false);
     setForm({
       role: user.role || "user",
       balance_dir: "increase",
@@ -91,50 +95,62 @@ export function UsersPage() {
     });
   }
 
+  function updateBalanceForm(patch: Partial<typeof form>) {
+    balanceRequestId.current = createAdjustmentRequestId();
+    setForm((previous) => ({ ...previous, ...patch }));
+  }
+
   async function saveEdit() {
-    if (!editing) return;
+    if (!editing || saveLock.current || !hasPermission(editMode === "role" ? "users:role" : "balance:write")) return;
+    saveLock.current = true;
     setSaving(true);
     try {
-      const payload: {
-        role: string;
-        balance_delta_fen?: number;
-        balance_note?: string;
-      } = { role: form.role };
-
-      const amountRaw = form.balance_amount_yuan.trim();
-      if (amountRaw) {
-        const amountYuan = parseFloat(amountRaw);
-        if (Number.isNaN(amountYuan) || amountYuan < 0) {
-          throw new Error("调账金额须为非负数字");
-        }
-        const amountFen = Math.round(amountYuan * 100);
-        if (amountFen > 0) {
-          const signed = form.balance_dir === "decrease" ? -amountFen : amountFen;
-          if (form.balance_dir === "decrease" && signed + editing.balance_fen < 0) {
-            throw new Error("减少后余额不能为负");
-          }
-          payload.balance_delta_fen = signed;
-          payload.balance_note = form.balance_note || undefined;
-        }
-      }
+      const payload = editMode === "role" ? { role: form.role } : buildBalanceAdjustment(
+        form.balance_amount_yuan, form.balance_dir, editing.balance_fen, form.balance_note, balanceRequestId.current,
+      );
 
       await api(`/api/admin/users/${editing.id}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
-      toast.success(payload.balance_delta_fen ? "已调账并保存" : "已保存");
+      toast.success(editMode === "balance" ? "已调账并保存" : "已保存");
+      setConfirming(false);
       setEditing(null);
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "保存失败");
+      const message = err instanceof Error ? err.message : "保存失败";
+      if (editMode === "balance" && /409|余额已变化|expected_balance|并发/.test(message)) {
+        setEditing(null);
+        setConfirming(false);
+        await load();
+        setFormError("余额已被其他操作更新，请重新打开用户详情并核对最新余额后再调账");
+      }
+      setFormError(editMode === "balance" && /409|余额已变化|expected_balance|并发/.test(message)
+        ? "余额已被其他操作更新，请重新打开用户详情并核对最新余额后再调账" : message);
+      setConfirming(false);
+      toast.error(message);
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   }
 
   function applyFilters() {
-    setPage(1);
-    void load(1, q, pageSize);
+    if (page === 1) void load(1, q, pageSize);
+    else setPage(1);
+  }
+
+  const amountFen = Math.round(Number(form.balance_amount_yuan || 0) * 100);
+  const balanceAfter = editing ? editing.balance_fen + (form.balance_dir === "decrease" ? -amountFen : amountFen) : 0;
+
+  function reviewChange() {
+    setFormError(null);
+    if (editMode === "balance") {
+      try { buildBalanceAdjustment(form.balance_amount_yuan, form.balance_dir, editing?.balance_fen ?? 0, form.balance_note, balanceRequestId.current); }
+      catch (cause) { setFormError(cause instanceof Error ? cause.message : "请检查调账信息"); return; }
+    } else if (form.role === editing?.role) { setFormError("角色未发生变化"); return; }
+    else if (editing?.id === getCachedUser()?.id && form.role !== "admin") { setFormError("不能降低自己的管理员权限"); return; }
+    setConfirming(true);
   }
 
   return (
@@ -152,8 +168,7 @@ export function UsersPage() {
         />
         <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="">全部角色</option>
-          <option value="user">user</option>
-          <option value="admin">admin</option>
+          {Object.entries(ADMIN_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
         </Select>
         <Button size="sm" className="admin-filter-action" onClick={applyFilters} disabled={loading}>
           {loading ? "加载中…" : "搜索"}
@@ -176,6 +191,7 @@ export function UsersPage() {
       />
 
       <div className="space-y-3">
+        <AdminListState loading={loading} error={error} empty={!data?.items.length} onRetry={() => void load()} emptyTitle="暂无匹配用户">
         <Table>
           <TableHeader>
             <TableRow>
@@ -200,7 +216,7 @@ export function UsersPage() {
                 <TableCell className="tabular-nums">¥{fenToYuan(u.balance_fen)}</TableCell>
                 <TableCell className="tabular-nums">¥{fenToYuan(u.frozen_fen)}</TableCell>
                 <TableCell>
-                  <Badge variant={u.role === "admin" ? "success" : "secondary"}>{u.role}</Badge>
+                  <Badge variant={u.role === "admin" ? "success" : "secondary"}>{ADMIN_ROLE_LABELS[u.role] ?? u.role}</Badge>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {u.created_at ? new Date(u.created_at).toLocaleString() : "—"}
@@ -217,9 +233,12 @@ export function UsersPage() {
                     >
                       查看
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(u)}>
-                      编辑
-                    </Button>
+                    {hasPermission("users:role") ? <Button size="sm" variant="ghost" onClick={() => openEdit(u, "role")}>
+                      角色
+                    </Button> : null}
+                    {hasPermission("balance:write") ? <Button size="sm" variant="ghost" onClick={() => openEdit(u, "balance")}>
+                      调账
+                    </Button> : null}
                   </div>
                 </TableCell>
               </TableRow>
@@ -233,8 +252,9 @@ export function UsersPage() {
             )}
           </TableBody>
         </Table>
+        </AdminListState>
 
-        {data && (
+        {!loading && !error && data && (
           <PaginationBar
             page={data.meta.page}
             pageSize={pageSize}
@@ -259,23 +279,26 @@ export function UsersPage() {
 
       <AdminModal
         open={!!editing}
-        onOpenChange={(open) => !open && setEditing(null)}
+        busy={saving}
+        onOpenChange={(open) => { if (!open && !saving) setEditing(null); }}
         size="md"
-        title="编辑用户"
+        title={editMode === "role" ? "调整用户角色" : "手动调账"}
         subtitle={editing?.email}
         footer={
-          <Button className="w-full sm:w-auto" disabled={saving} onClick={() => void saveEdit()}>
-            {saving ? "保存中…" : "保存修改"}
+          <Button className="w-full sm:w-auto" disabled={saving} onClick={reviewChange}>
+            {saving ? "保存中…" : "核对并继续"}
           </Button>
         }
       >
+        {formError ? <p role="alert" className="text-sm text-red-700">{formError}</p> : null}
         <div className="admin-form-grid admin-form-grid--2">
+          {editMode === "role" ? <>
           <AdminField label="角色">
             <Select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
-              <option value="user">user</option>
-              <option value="admin">admin</option>
+              {Object.entries(ADMIN_ROLE_LABELS).map(([role, label]) => <option key={role} value={role} disabled={editing?.id === getCachedUser()?.id && role !== "admin"}>{label}</option>)}
             </Select>
           </AdminField>
+          </> : <>
           <AdminField label="当前余额" hint="只读">
             <Input value={editing ? `¥${fenToYuan(editing.balance_fen)}` : "—"} disabled readOnly />
           </AdminField>
@@ -283,10 +306,9 @@ export function UsersPage() {
             <Select
               value={form.balance_dir}
               onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
+                updateBalanceForm({
                   balance_dir: e.target.value === "decrease" ? "decrease" : "increase",
-                }))
+                })
               }
             >
               <option value="increase">增加</option>
@@ -300,28 +322,43 @@ export function UsersPage() {
                 ? form.balance_dir === "increase"
                   ? "保存后余额将增加该金额"
                   : "保存后余额将减少该金额"
-                : "留空则不改余额"
+                : "请输入本次需要调整的金额"
             }
           >
             <Input
               type="number"
               min="0"
+              max="21474836.47"
               step="0.01"
               inputMode="decimal"
               value={form.balance_amount_yuan}
-              onChange={(e) => setForm((f) => ({ ...f, balance_amount_yuan: e.target.value }))}
+              onChange={(e) => updateBalanceForm({ balance_amount_yuan: e.target.value })}
               placeholder="例如 100"
             />
           </AdminField>
-          <AdminField label="调账备注" hint="可选；仅改余额时写入流水">
+          <AdminField label="调账原因（必填）" hint="随操作人和金额写入调账流水">
             <Input
               value={form.balance_note}
-              onChange={(e) => setForm((f) => ({ ...f, balance_note: e.target.value }))}
+              maxLength={255}
+              onChange={(e) => updateBalanceForm({ balance_note: e.target.value })}
               placeholder="管理员备注"
             />
           </AdminField>
+          <p className="admin-form-grid--full text-sm" aria-live="polite">预计余额：¥{Number.isFinite(balanceAfter) ? fenToYuan(balanceAfter) : "—"}</p>
+          </>}
         </div>
       </AdminModal>
+      <AdminConfirmDialog
+        open={confirming}
+        onOpenChange={(open) => { if (!saving) setConfirming(open); }}
+        title={editMode === "role" ? "确认角色变更" : "确认手动调账"}
+        description={editMode === "role"
+          ? `将 ${editing?.email ?? ""} 的角色由 ${ADMIN_ROLE_LABELS[editing?.role ?? ""] ?? editing?.role ?? ""} 改为 ${ADMIN_ROLE_LABELS[form.role] ?? form.role}。该操作将改变后台访问权限。`
+          : `${editing?.email ?? ""}：余额 ¥${fenToYuan(editing?.balance_fen ?? 0)} → ¥${fenToYuan(balanceAfter)}，原因：${form.balance_note.trim()}`}
+        confirmLabel="确认提交"
+        loading={saving}
+        onConfirm={() => void saveEdit()}
+      />
     </div>
   );
 }

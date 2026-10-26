@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   LabeledControl,
   SettingsLoading,
+  SettingsError,
   SettingsPanel,
   SettingsStatusBar,
   SettingsTabShell,
@@ -12,7 +13,7 @@ import { useAdminModelSettings } from "@/hooks/useAdminModelSettings";
 
 // 阿里云 OSS 存储配置
 export function OssSettingsPanel() {
-  const { form, loading, saving, patchField, save } = useAdminModelSettings();
+  const { form, loading, saving, error, dirty, saveFeedback, load, patchField, save } = useAdminModelSettings();
   const [ossKeyIdInput, setOssKeyIdInput] = useState("");
   const [ossKeySecretInput, setOssKeySecretInput] = useState("");
   const [clearOssId, setClearOssId] = useState(false);
@@ -29,7 +30,7 @@ export function OssSettingsPanel() {
 
   async function handleSave() {
     if (!form) return;
-    await save(
+    const saved = await save(
       {
         oss_enabled: form.oss_enabled,
         oss_endpoint: form.oss_endpoint,
@@ -46,18 +47,21 @@ export function OssSettingsPanel() {
       },
       "存储配置已保存",
     );
+    if (!saved) return;
     setOssKeyIdInput("");
     setOssKeySecretInput("");
     setClearOssId(false);
     setClearOssSecret(false);
   }
 
+  if (error && !form) return <SettingsError error={error} onRetry={() => void load()} />;
+
   if (loading || !form) {
     return <SettingsLoading />;
   }
 
   return (
-    <SettingsTabShell onSave={() => void handleSave()} saving={saving}>
+    <SettingsTabShell onSave={handleSave} saving={saving} dirty={dirty || Boolean(ossKeyIdInput || ossKeySecretInput || clearOssId || clearOssSecret)} feedback={saveFeedback}>
       <SettingsStatusBar
         title="存储就绪状态"
         items={[

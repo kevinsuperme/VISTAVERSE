@@ -1,5 +1,7 @@
 # Admin API router aggregation
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.deps import get_current_admin
 
 from app.api.admin import (
     dashboard,
@@ -9,6 +11,7 @@ from app.api.admin import (
     drama_fragments,
     drama_projects,
     ledger,
+    notifications,
     orders,
     projects,
     queues,
@@ -20,7 +23,7 @@ from app.api.admin import (
     works,
 )
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 router.include_router(dashboard.router)
 router.include_router(finance.router)
 router.include_router(queues.router)
@@ -29,6 +32,7 @@ router.include_router(settings.router)
 router.include_router(users.router)
 router.include_router(orders.router)
 router.include_router(ledger.router)
+router.include_router(notifications.router)
 router.include_router(usage.router)
 router.include_router(projects.router)
 router.include_router(works.router)

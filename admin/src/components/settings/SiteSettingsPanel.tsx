@@ -1,6 +1,7 @@
 import {
   LabeledControl,
   SettingsLoading,
+  SettingsError,
   SettingsPanel,
   SettingsStatusBar,
   SettingsTabShell,
@@ -9,7 +10,7 @@ import { useAdminModelSettings } from "@/hooks/useAdminModelSettings";
 
 /** 站点公网地址与媒体工具路径 */
 export function SiteSettingsPanel() {
-  const { form, loading, saving, patchField, save } = useAdminModelSettings();
+  const { form, loading, saving, error, dirty, saveFeedback, load, patchField, save } = useAdminModelSettings();
 
   async function handleSave() {
     if (!form) return;
@@ -23,6 +24,8 @@ export function SiteSettingsPanel() {
     );
   }
 
+  if (error && !form) return <SettingsError error={error} onRetry={() => void load()} />;
+
   if (loading || !form) {
     return <SettingsLoading />;
   }
@@ -32,7 +35,7 @@ export function SiteSettingsPanel() {
   const hasFfprobe = Boolean(form.ffprobe_path?.trim());
 
   return (
-    <SettingsTabShell onSave={() => void handleSave()} saving={saving}>
+    <SettingsTabShell onSave={handleSave} saving={saving} dirty={dirty} feedback={saveFeedback}>
       <SettingsStatusBar
         title="站点工具状态"
         items={[

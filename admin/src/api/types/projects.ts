@@ -172,6 +172,9 @@ export type AdminWork = {
   video_url: string;
   visibility: string;
   audit_status: string;
+  audit_reason: string;
+  audited_by: number | null;
+  audited_at: string | null;
   published_at: string;
 };
 

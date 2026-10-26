@@ -92,6 +92,7 @@ async def db_session(billing_enabled: None) -> AsyncIterator[AsyncSession]:
     import app.models_drama  # noqa: F401
     import app.models_settings  # noqa: F401
     import app.models_tasks  # noqa: F401
+    import app.models_admin  # noqa: F401
 
     url = (get_settings().database_url or "").strip()
     if not url.startswith("postgresql"):

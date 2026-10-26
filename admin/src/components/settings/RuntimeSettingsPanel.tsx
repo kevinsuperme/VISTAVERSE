@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Activity } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AdminModelSettings } from "@/api/client";
+import { useAdminModelSettings } from "@/hooks/useAdminModelSettings";
 import {
   LabeledControl,
   SettingsLoading,
+  SettingsError,
   SettingsPanel,
   SettingsStatusBar,
   SettingsTabShell,
@@ -13,25 +14,7 @@ import { Switch } from "@/components/ui/switch";
 
 // 运行参数配置（并发、质量、Mock 等 flat 字段）
 export function RuntimeSettingsPanel() {
-  const [form, setForm] = useState<AdminModelSettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api<AdminModelSettings>("/api/admin/settings/models");
-      setForm(data);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { form, loading, saving, error, dirty, saveFeedback, load, patchField, save } = useAdminModelSettings();
 
   const statusItems = useMemo(
     () =>
@@ -45,14 +28,13 @@ export function RuntimeSettingsPanel() {
     [form?.readiness],
   );
 
-  function patchField<K extends keyof AdminModelSettings>(key: K, value: AdminModelSettings[K]) {
-    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }
-
   async function handleSave() {
     if (!form) return;
-    setSaving(true);
-    try {
+    if (form.seedance_duration_min <= 0 || form.seedance_duration_max < form.seedance_duration_min) {
+      toast.error("视频时长必须大于 0，且最大时长不能小于最小时长");
+      return;
+    }
+    {
       const body = {
         ark_image_size: form.ark_image_size,
         ark_video_resolution: form.ark_video_resolution,
@@ -71,22 +53,18 @@ export function RuntimeSettingsPanel() {
         drama_fragment_max_attempts: form.drama_fragment_max_attempts,
         ark_mock: form.ark_mock,
       };
-      await api("/api/admin/settings/models", { method: "PATCH", body: JSON.stringify(body) });
-      await load();
-      toast.success("运行参数已保存");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "保存失败");
-    } finally {
-      setSaving(false);
+      await save(body, "运行参数已保存");
     }
   }
+
+  if (error && !form) return <SettingsError error={error} onRetry={() => void load()} />;
 
   if (loading || !form) {
     return <SettingsLoading />;
   }
 
   return (
-    <SettingsTabShell onSave={() => void handleSave()} saving={saving}>
+    <SettingsTabShell onSave={handleSave} saving={saving} dirty={dirty} feedback={saveFeedback}>
       <SettingsStatusBar
         title="路由就绪状态"
         items={

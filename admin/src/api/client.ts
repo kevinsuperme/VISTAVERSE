@@ -1,5 +1,5 @@
-import { clearAuth, getToken, setCachedUser, setToken, type AdminUser } from "@/lib/auth";
-import { buildLoginRedirect } from "@/lib/authRedirect";
+import { clearAuth, getToken, isAdminUser, setCachedUser, setToken, type AdminUser } from "@/lib/auth";
+import { sessionLoginRedirect } from "@/lib/authRedirect";
 
 type ApiError = {
   detail?: string | { msg?: string }[];
@@ -14,10 +14,10 @@ function errorMessage(data: ApiError, status: number): string {
 }
 
 // 为管理接口附加会话信息，统一处理响应与登录失效
-export async function api<T>(
+export async function adminFetch(
   path: string,
   options: RequestInit = {},
-): Promise<T> {
+): Promise<Response> {
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type") && options.body && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
@@ -26,17 +26,24 @@ export async function api<T>(
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(path, { ...options, headers });
-  const text = await res.text();
-  const data = text ? (JSON.parse(text) as ApiError & T) : ({} as T);
   // 登录 401 = 账号密码错误；其它 401 = 会话失效
   const isLoginRequest = path.includes("/api/auth/login");
   if (res.status === 401 && !isLoginRequest) {
     clearAuth();
-    if (!window.location.pathname.startsWith("/login")) {
-      const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      window.location.href = buildLoginRedirect(returnPath);
-    }
+    const redirect = sessionLoginRedirect(window.location.pathname, window.location.search, window.location.hash, import.meta.env.BASE_URL);
+    if (redirect) window.location.href = redirect;
     throw new Error("未登录或登录已失效");
+  }
+  return res;
+}
+
+/** JSON 接口与文件下载共用身份校验；代理错误页不直接抛 JSON 解析异常。 */
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const res = await adminFetch(path, options);
+  const text = await res.text();
+  let data: ApiError & T = {} as ApiError & T;
+  try { if (text) data = JSON.parse(text) as ApiError & T; } catch {
+    if (res.ok) throw new Error("服务返回了无法识别的数据，请重试");
   }
   if (!res.ok) {
     throw new Error(errorMessage(data as ApiError, res.status));
@@ -51,8 +58,9 @@ export async function loginAsAdmin(email: string, password: string): Promise<Adm
     body: JSON.stringify({ email, password }),
   });
   setToken(tokenRes.access_token);
-  const me = await api<AdminUser>("/api/auth/me");
-  if (me.role !== "admin") {
+  let me: AdminUser;
+  try { me = await api<AdminUser>("/api/auth/me"); } catch (error) { clearAuth(); throw error; }
+  if (!isAdminUser(me)) {
     clearAuth();
     throw new Error("该账号没有管理员权限");
   }

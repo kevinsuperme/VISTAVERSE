@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
+import { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { api, type AdminDramaEpisode, type PageMeta } from "@/api/client";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
 import { AdminFilterBar } from "@/components/admin/AdminFilterBar";
 import { AdminUserSearchSelect } from "@/components/admin/AdminUserSearchSelect";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -15,25 +17,20 @@ type ListRes = { items: AdminDramaEpisode[]; meta: PageMeta };
 
 /** 全站漫剧分集列表 */
 export function DramaEpisodesPage() {
-  const [searchParams] = useSearchParams();
-  const initialProjectId = searchParams.get("project_id");
+  const location = useLocation();
 
-  const [page, setPage] = useState(1);
-  const [q, setQ] = useState("");
-  const [userId, setUserId] = useState<number | null>(null);
-  const [projectId, setProjectId] = useState(initialProjectId ?? "");
-  const [data, setData] = useState<ListRes | null>(null);
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const [q, setQ] = useAdminUrlState<string>("q", "");
+  const [userId, setUserId] = useAdminUrlState<number | null>("user_id", null);
+  const [projectId, setProjectId] = useAdminUrlState<string>("project_id", "");
+  const { data, loading, error, run } = useAdminRequest<ListRes>();
 
   async function load(nextPage = page) {
-    try {
-      const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
-      if (q.trim()) params.set("q", q.trim());
-      if (userId) params.set("user_id", String(userId));
-      if (projectId.trim()) params.set("project_id", projectId.trim());
-      setData(await api<ListRes>(`/api/admin/drama-episodes?${params}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    }
+  const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
+  if (q.trim()) params.set("q", q.trim());
+  if (userId) params.set("user_id", String(userId));
+  if (projectId.trim()) params.set("project_id", projectId.trim());
+    await run(() => api<ListRes>(`/api/admin/drama-episodes?${params}`));
   }
 
   useEffect(() => {
@@ -53,14 +50,15 @@ export function DramaEpisodesPage() {
           variant="secondary"
           className="admin-filter-action"
           onClick={() => {
-            setPage(1);
-            void load(1);
+            if (page === 1) void load(1);
+            else setPage(1);
           }}
         >
           筛选
         </Button>
       </AdminFilterBar>
 
+      <AdminListState loading={loading} error={error} empty={!data?.items.length} onRetry={() => void load()}>
       <div className="admin-table-wrap">
         <table>
           <thead>
@@ -97,7 +95,7 @@ export function DramaEpisodesPage() {
                 </td>
                 <td>
                   <Button size="sm" variant="outline" asChild>
-                    <Link to={`/drama-episodes/${row.id}`}>查看</Link>
+                    <Link to={`/drama-episodes/${row.id}`} state={{ from: `${location.pathname}${location.search}` }}>查看</Link>
                   </Button>
                 </td>
               </tr>
@@ -112,8 +110,9 @@ export function DramaEpisodesPage() {
           </tbody>
         </table>
       </div>
+      </AdminListState>
 
-      {data?.meta ? (
+      {!loading && !error && data?.meta ? (
         <PaginationBar
           page={data.meta.page}
           pageSize={data.meta.page_size}

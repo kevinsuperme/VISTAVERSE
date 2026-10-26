@@ -10,7 +10,7 @@ type AdminFilterBarProps = {
 /** 管理端列表筛选条：单行紧凑横排，空间不足时自动换行 */
 export function AdminFilterBar({ children, trailing, className }: AdminFilterBarProps) {
   return (
-    <div className={cn("admin-filter-bar", className)}>
+    <div className={cn("admin-filter-bar", className)} role="search" aria-label="筛选条件">
       <div className="admin-filter-bar-main">{children}</div>
       {trailing ? <div className="admin-filter-bar-trailing">{trailing}</div> : null}
     </div>

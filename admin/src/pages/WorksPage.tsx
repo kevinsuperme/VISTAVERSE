@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, type AdminWork, type PageMeta } from "@/api/client";
 import { AdminDetailMeta, AdminDetailSection } from "@/components/admin/AdminDetailLayout";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
 import { AdminFilterBar } from "@/components/admin/AdminFilterBar";
 import { AdminModal } from "@/components/admin/AdminModal";
 import { AdminSearchInput } from "@/components/admin/AdminSearchInput";
@@ -12,12 +15,18 @@ import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { AdminField } from "@/components/admin/AdminField";
+import { Textarea } from "@/components/ui/select";
+import { AdminExportButton } from "@/components/admin/AdminExportButton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/ui/page";
 import { useAdminDetailQuery } from "@/hooks/useAdminDetailQuery";
 import { auditStatusLabel, visibilityLabel } from "@/lib/statusLabels";
+import { hasPermission } from "@/lib/permissions";
 
 type ListRes = { items: AdminWork[]; meta: PageMeta };
+type WorkChange = { audit_status?: string; visibility?: string; audit_reason?: string };
+type BulkResult = { results: { id: number; success: boolean; error?: string }[]; succeeded: number; failed: number };
 
 function coverSrc(url: string | null | undefined): string {
   const trimmed = (url || "").trim();
@@ -28,26 +37,32 @@ function coverSrc(url: string | null | undefined): string {
 
 // 作品审核：搜索、预览与只读详情
 export function WorksPage() {
-  const [auditStatus, setAuditStatus] = useState("");
-  const [visibility, setVisibility] = useState("");
-  const [q, setQ] = useState("");
-  const [userId, setUserId] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<ListRes | null>(null);
+  const [auditStatus, setAuditStatus] = useAdminUrlState<string>("audit_status", "");
+  const [visibility, setVisibility] = useAdminUrlState<string>("visibility", "");
+  const [q, setQ] = useAdminUrlState<string>("q", "");
+  const [userId, setUserId] = useAdminUrlState<number | null>("user_id", null);
+  const [page, setPage] = useAdminUrlState<number>("page", 1);
+  const { data, loading, error, run } = useAdminRequest<ListRes>();
   const [detail, setDetail] = useState<AdminWork | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailRetry, setDetailRetry] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [action, setAction] = useState<{ ids: number[]; body: WorkChange } | null>(null);
+  const [reason, setReason] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingIds, setPendingIds] = useState<number[]>([]);
+  const actionLock = useRef(false);
   const workDetail = useAdminDetailQuery("work");
+  const canReview = hasPermission("works:review");
 
   async function load(nextPage = page) {
-    try {
-      const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
-      if (auditStatus) params.set("audit_status", auditStatus);
-      if (visibility) params.set("visibility", visibility);
-      if (q.trim()) params.set("q", q.trim());
-      if (userId) params.set("user_id", String(userId));
-      setData(await api<ListRes>(`/api/admin/works?${params}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载失败");
-    }
+  const params = new URLSearchParams({ page: String(nextPage), page_size: String(DEFAULT_PAGE_SIZE) });
+  if (auditStatus) params.set("audit_status", auditStatus);
+  if (visibility) params.set("visibility", visibility);
+  if (q.trim()) params.set("q", q.trim());
+  if (userId) params.set("user_id", String(userId));
+    await run(() => api<ListRes>(`/api/admin/works?${params}`));
   }
 
   useEffect(() => {
@@ -56,29 +71,76 @@ export function WorksPage() {
   }, [page]);
 
   useEffect(() => {
-    if (!workDetail.id || !data?.items) return;
-    const hit = data.items.find((w) => w.id === workDetail.id);
-    if (hit) setDetail(hit);
-  }, [workDetail.id, data?.items]);
+    if (!workDetail.id) { setDetail(null); return; }
+    let cancelled = false;
+    setDetail(null);
+    setDetailLoading(true);
+    setDetailError(null);
+    void api<AdminWork>(`/api/admin/works/${workDetail.id}`)
+      .then((value) => { if (!cancelled) setDetail(value); })
+      .catch((cause) => { if (!cancelled) setDetailError(cause instanceof Error ? cause.message : "加载作品失败"); })
+      .finally(() => { if (!cancelled) setDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [workDetail.id, detailRetry]);
 
-  async function patchWork(id: number, body: { visibility?: string; audit_status?: string }) {
+  useEffect(() => { setSelectedIds([]); }, [page, auditStatus, visibility, q, userId]);
+
+  function reviewAction(ids: number[], body: WorkChange) {
+    setAction({ ids, body });
+    setReason("");
+    setActionError(null);
+  }
+
+  async function submitAction() {
+    if (!action || actionLock.current || !canReview) return;
+    if (action.body.audit_status === "rejected" && !reason.trim()) {
+      setActionError("请填写拒绝原因");
+      return;
+    }
+    const body = { ...action.body, audit_reason: reason.trim() || undefined };
+    actionLock.current = true;
+    setPendingIds(action.ids);
+    setActionError(null);
     try {
-      await api(`/api/admin/works/${id}`, { method: "PATCH", body: JSON.stringify(body) });
-      toast.success("已更新");
+      let failedIds: number[] = [];
+      if (action.ids.length === 1) {
+        await api(`/api/admin/works/${action.ids[0]}`, { method: "PATCH", body: JSON.stringify(body) });
+        toast.success("作品已更新");
+      } else {
+        const result = await api<BulkResult>("/api/admin/works/bulk", { method: "POST", body: JSON.stringify({ ids: action.ids, ...body }) });
+        failedIds = result.results.filter((item) => !item.success).map((item) => item.id);
+        if (result.failed) {
+          setActionError(result.results.filter((item) => !item.success).map((item) => `#${item.id}：${item.error || "处理失败"}`).join("；"));
+          setAction({ ids: failedIds, body: action.body });
+          toast.warning(`已处理 ${result.succeeded} 项，${result.failed} 项失败`);
+        } else toast.success(`已更新 ${result.succeeded} 个作品`);
+      }
       await load();
+      setSelectedIds(failedIds);
+      if (!failedIds.length) setAction(null);
+      if (workDetail.isOpen) setDetailRetry((value) => value + 1);
     } catch (err) {
+      setActionError(err instanceof Error ? err.message : "更新失败");
       toast.error(err instanceof Error ? err.message : "更新失败");
+    } finally {
+      actionLock.current = false;
+      setPendingIds([]);
     }
   }
 
   function openWork(work: AdminWork) {
-    setDetail(work);
     workDetail.open(work.id);
   }
 
+  const exportParams = new URLSearchParams();
+  if (auditStatus) exportParams.set("audit_status", auditStatus);
+  if (visibility) exportParams.set("visibility", visibility);
+  if (q.trim()) exportParams.set("q", q.trim());
+  if (userId) exportParams.set("user_id", String(userId));
+
   return (
     <div className="admin-list-page">
-      <PageHeader description="调整可见性与审核状态" />
+      <PageHeader description="调整可见性与审核状态" actions={<AdminExportButton path={`/api/admin/works/export?${exportParams}`} filename="作品审核.csv" />} />
       <AdminFilterBar>
         <AdminSearchInput
           value={q}
@@ -86,8 +148,8 @@ export function WorksPage() {
           placeholder="搜索标题"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              setPage(1);
-              void load(1);
+              if (page === 1) void load(1);
+              else setPage(1);
             }
           }}
         />
@@ -109,17 +171,25 @@ export function WorksPage() {
           variant="secondary"
           className="admin-filter-action"
           onClick={() => {
-            setPage(1);
-            void load(1);
+            if (page === 1) void load(1);
+            else setPage(1);
           }}
         >
           筛选
         </Button>
       </AdminFilterBar>
+      {canReview && selectedIds.length ? <div className="admin-filter-bar" role="region" aria-label="批量操作">
+        <span>已选 {selectedIds.length} 项（当前页）</span>
+        <Button size="sm" disabled={!!pendingIds.length} onClick={() => reviewAction(selectedIds, { audit_status: "passed" })}>批量通过</Button>
+        <Button size="sm" variant="outline" disabled={!!pendingIds.length} onClick={() => reviewAction(selectedIds, { audit_status: "rejected" })}>批量拒绝</Button>
+        <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>取消选择</Button>
+      </div> : null}
+      <AdminListState loading={loading} error={error} empty={!data?.items.length} onRetry={() => void load()}>
       <div className="rounded-lg border bg-background">
         <Table>
           <TableHeader>
             <TableRow>
+              {canReview ? <TableHead><input type="checkbox" aria-label="选择当前页全部作品" checked={!!data?.items.length && selectedIds.length === data.items.length} onChange={(event) => setSelectedIds(event.target.checked ? (data?.items ?? []).map((item) => item.id) : [])} disabled={!!pendingIds.length} /></TableHead> : null}
               <TableHead>封面</TableHead>
               <TableHead>ID</TableHead>
               <TableHead>标题</TableHead>
@@ -133,6 +203,7 @@ export function WorksPage() {
           <TableBody>
             {(data?.items ?? []).map((w) => (
               <TableRow key={w.id}>
+                {canReview ? <TableCell><input type="checkbox" aria-label={`选择作品 ${w.title}`} checked={selectedIds.includes(w.id)} disabled={!!pendingIds.length} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, w.id] : ids.filter((id) => id !== w.id))} /></TableCell> : null}
                 <TableCell>
                   {w.cover_url ? (
                     <button type="button" onClick={() => openWork(w)} className="block">
@@ -175,27 +246,29 @@ export function WorksPage() {
                     <Button size="sm" variant="outline" onClick={() => openWork(w)}>
                       详情
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void patchWork(w.id, { audit_status: "passed" })}>
+                    {canReview ? <><Button size="sm" variant="outline" disabled={pendingIds.includes(w.id) || w.audit_status === "passed"} onClick={() => reviewAction([w.id], { audit_status: "passed" })}>
                       通过
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => void patchWork(w.id, { audit_status: "rejected" })}
+                      disabled={pendingIds.includes(w.id) || w.audit_status === "rejected"}
+                      onClick={() => reviewAction([w.id], { audit_status: "rejected" })}
                     >
                       拒绝
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
+                      disabled={pendingIds.includes(w.id)}
                       onClick={() =>
-                        void patchWork(w.id, {
+                        reviewAction([w.id], {
                           visibility: w.visibility === "public" ? "private" : "public",
                         })
                       }
                     >
                       {w.visibility === "public" ? "设私密" : "设公开"}
-                    </Button>
+                    </Button></> : null}
                   </div>
                 </TableCell>
               </TableRow>
@@ -203,7 +276,8 @@ export function WorksPage() {
           </TableBody>
         </Table>
       </div>
-      {data && (
+      </AdminListState>
+      {!loading && !error && data && (
         <PaginationBar
           page={data.meta.page}
           pageSize={data.meta.page_size}
@@ -213,7 +287,8 @@ export function WorksPage() {
       )}
 
       <AdminModal
-        open={workDetail.isOpen && !!detail}
+        open={workDetail.isOpen}
+        presentation="drawer"
         onOpenChange={(open) => {
           if (!open) {
             setDetail(null);
@@ -224,6 +299,8 @@ export function WorksPage() {
         title={detail?.title ?? "作品详情"}
         subtitle={detail ? `作品 #${detail.id}` : undefined}
       >
+        {detailLoading ? <div className="admin-empty" role="status">加载作品详情…</div> : null}
+        {detailError ? <div className="admin-empty" role="alert"><p>{detailError}</p><Button variant="outline" onClick={() => setDetailRetry((value) => value + 1)}>重试</Button></div> : null}
         {detail ? (
           <>
             {(detail.cover_url || detail.video_url) ? (
@@ -261,6 +338,9 @@ export function WorksPage() {
                   },
                   { label: "可见性", value: visibilityLabel(detail.visibility) },
                   { label: "审核", value: auditStatusLabel(detail.audit_status) },
+                  { label: "审核原因", value: detail.audit_reason || "—", full: true },
+                  { label: "审核人", value: detail.audited_by ? `管理员 #${detail.audited_by}` : "—" },
+                  { label: "审核时间", value: detail.audited_at ? new Date(detail.audited_at).toLocaleString() : "—" },
                   {
                     label: "发布时间",
                     value: new Date(detail.published_at).toLocaleString(),
@@ -278,6 +358,15 @@ export function WorksPage() {
             ) : null}
           </>
         ) : null}
+      </AdminModal>
+      <AdminModal open={!!action} busy={!!pendingIds.length} onOpenChange={(open) => { if (!open && !pendingIds.length) setAction(null); }} size="md" title="确认作品操作" subtitle={action ? `将处理 ${action.ids.length} 个作品：${action.body.audit_status ? auditStatusLabel(action.body.audit_status) : visibilityLabel(action.body.visibility || "")}` : undefined} footer={<>
+        <Button variant="outline" disabled={!!pendingIds.length} onClick={() => setAction(null)}>取消</Button>
+        <Button disabled={!!pendingIds.length} onClick={() => void submitAction()}>{pendingIds.length ? "处理中…" : "确认提交"}</Button>
+      </>}>
+        <AdminField label={action?.body.audit_status === "rejected" ? "拒绝原因（必填）" : "操作备注"}>
+          <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} placeholder="填写本次操作的原因" disabled={!!pendingIds.length} />
+        </AdminField>
+        {actionError ? <p role="alert" className="text-sm text-red-700">{actionError}</p> : null}
       </AdminModal>
     </div>
   );

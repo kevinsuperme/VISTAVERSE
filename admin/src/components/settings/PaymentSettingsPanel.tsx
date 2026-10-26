@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   LabeledControl,
   SettingsLoading,
+  SettingsError,
   SettingsPanel,
   SettingsStatusBar,
   SettingsTabShell,
@@ -14,7 +15,7 @@ import { api } from "@/api/client";
 
 // 易支付与 Token 计费配置
 export function PaymentSettingsPanel() {
-  const { form, loading, saving, patchField, save } = useAdminModelSettings();
+  const { form, loading, saving, error, dirty, saveFeedback, load, patchField, save } = useAdminModelSettings();
   const [epayKeyInput, setEpayKeyInput] = useState("");
   const [clearEpayKey, setClearEpayKey] = useState(false);
   const [smtpPasswordInput, setSmtpPasswordInput] = useState("");
@@ -59,7 +60,7 @@ export function PaymentSettingsPanel() {
 
   async function handleSave() {
     if (!form) return;
-    await save(
+    const saved = await save(
       {
         epay_api_url: form.epay_api_url,
         epay_pid: form.epay_pid,
@@ -98,6 +99,7 @@ export function PaymentSettingsPanel() {
       },
       "支付与计费已保存",
     );
+    if (!saved) return;
     setEpayKeyInput("");
     setClearEpayKey(false);
     setSmtpPasswordInput("");
@@ -144,12 +146,14 @@ export function PaymentSettingsPanel() {
     }
   }
 
+  if (error && !form) return <SettingsError error={error} onRetry={() => void load()} />;
+
   if (loading || !form) {
     return <SettingsLoading />;
   }
 
   return (
-    <SettingsTabShell onSave={() => void handleSave()} saving={saving}>
+    <SettingsTabShell onSave={handleSave} saving={saving} dirty={dirty || Boolean(epayKeyInput || smtpPasswordInput || clearEpayKey || clearSmtpPassword)} feedback={saveFeedback}>
       <SettingsStatusBar
         title="支付就绪状态"
         items={[

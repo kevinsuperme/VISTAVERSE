@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { toast } from "sonner";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
+import { safeNextPath } from "@/lib/authRedirect";
 import { api, type AdminDramaFragment } from "@/api/client";
 import {
   AdminDetailMeta,
@@ -14,36 +15,27 @@ import { formatDramaGenerationStatus } from "@/lib/dramaLabels";
 /** 漫剧分镜详情 */
 export function DramaFragmentDetailPage() {
   const { fragmentId } = useParams<{ fragmentId: string }>();
-  const navigate = useNavigate();
-  const [detail, setDetail] = useState<AdminDramaFragment | null>(null);
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const returnTo = safeNextPath((location.state as { from?: string } | null)?.from, "/drama-fragments");
+  const { data: detail, loading, error, run } = useAdminRequest<AdminDramaFragment>();
   const id = Number(fragmentId);
 
-  useEffect(() => {
-    if (!id || Number.isNaN(id)) {
-      navigate("/drama-fragments", { replace: true });
-      return;
-    }
-    setLoading(true);
-    void api<AdminDramaFragment>(`/api/admin/drama-fragments/${id}`)
-      .then(setDetail)
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "加载失败");
-        navigate("/drama-fragments", { replace: true });
-      })
-      .finally(() => setLoading(false));
-  }, [id, navigate]);
+  const load = useCallback(() => run(() => {
+    if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error("无效的详情编号"));
+    return api<AdminDramaFragment>(`/api/admin/drama-fragments/${id}`);
+  }), [id, run]);
+  useEffect(() => { void load(); }, [load]);
 
-  if (loading && !detail) {
+  if (loading) {
     return <div className="admin-detail-page-loading">加载中…</div>;
   }
-  if (!detail) return null;
+  if (error || !detail) return <div className="admin-route-state" role="alert"><p>{error || "未找到详情"}</p><Button onClick={() => void load()}>重新加载</Button><Button variant="outline" asChild><Link to={returnTo}>返回列表</Link></Button></div>;
 
   return (
     <div className="admin-detail-page">
       <div className="admin-detail-page-toolbar">
         <Button variant="ghost" size="sm" className="admin-detail-back" asChild>
-          <Link to="/drama-fragments">
+          <Link to={returnTo}>
             <ArrowLeft className="h-4 w-4" />
             返回分镜列表
           </Link>

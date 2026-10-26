@@ -57,7 +57,7 @@ async def test_admin_balance_patch_selects_user_for_update() -> None:
         phone="",
         created_at=None,
     )
-    admin = SimpleNamespace(id=1)
+    admin = SimpleNamespace(id=1, role="admin")
     statements = []
 
     class Result:
@@ -80,7 +80,7 @@ async def test_admin_balance_patch_selects_user_for_update() -> None:
 
     out = await patch_user(
         user_id=target.id,
-        body=AdminUserPatch(balance_delta_fen=50),
+        body=AdminUserPatch(balance_delta_fen=50, balance_note="回归测试"),
         admin=admin,
         db=FakeDb(),
     )

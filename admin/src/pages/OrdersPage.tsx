@@ -1,7 +1,11 @@
+import { useAdminUrlState } from "@/hooks/useAdminUrlState";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import type { AdminLedger, AdminOrder, AdminUsageEventListRes, PageResult } from "@/api/client";
+import { api } from "@/api/client";
+import { AdminListState } from "@/components/admin/AdminListState";
+import { useAdminRequest } from "@/hooks/useAdminRequest";
 import { listAdminLedger, listAdminOrders, listAdminUsageEvents } from "@/api/finance";
 import { AdminDateRangeFilter } from "@/components/admin/AdminDateRangeFilter";
 import { AdminEntityLink } from "@/components/admin/AdminEntityLink";
@@ -19,6 +23,7 @@ import { PageHeader } from "@/components/ui/page";
 import { useAdminDetailQuery } from "@/hooks/useAdminDetailQuery";
 import { fenToYuan } from "@/lib/utils";
 import { ledgerKindLabel, orderStatusLabel, payTypeLabel, taskDomainLabel } from "@/lib/statusLabels";
+import { hasPermission } from "@/lib/permissions";
 
 type OrderRes = PageResult<AdminOrder>;
 type LedgerRes = PageResult<AdminLedger>;
@@ -34,46 +39,46 @@ function tabFromSearch(raw: string | null): string {
 export function OrdersPage() {
   // 列表筛选与分页分别保留，切换 Tab 不清空其他列表状态。
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState(() => tabFromSearch(searchParams.get("tab")));
-  const [orderStatus, setOrderStatus] = useState("");
-  const [orderUserId, setOrderUserId] = useState<number | null>(null);
-  const [ledgerKind, setLedgerKind] = useState("");
-  const [ledgerUserId, setLedgerUserId] = useState<number | null>(null);
-  const [orderPage, setOrderPage] = useState(1);
-  const [ledgerPage, setLedgerPage] = useState(1);
-  const [usagePage, setUsagePage] = useState(1);
-  const [usageUserId, setUsageUserId] = useState<number | null>(null);
-  const [usageTaskId, setUsageTaskId] = useState("");
-  const [usageDomain, setUsageDomain] = useState("");
-  const [usageBillingKey, setUsageBillingKey] = useState("");
-  const [usageCapability, setUsageCapability] = useState("");
-  const [usageModel, setUsageModel] = useState("");
-  const [usageBasis, setUsageBasis] = useState("");
-  const [usageDateFrom, setUsageDateFrom] = useState("");
-  const [usageDateTo, setUsageDateTo] = useState("");
-  const [orders, setOrders] = useState<OrderRes | null>(null);
-  const [ledger, setLedger] = useState<LedgerRes | null>(null);
-  const [usage, setUsage] = useState<AdminUsageEventListRes | null>(null);
+  const canReadFinance = hasPermission("finance:read");
+  const tab = canReadFinance ? tabFromSearch(searchParams.get("tab")) : "orders";
+  const [orderStatus, setOrderStatus] = useAdminUrlState<string>("order_status", "");
+  const [orderUserId, setOrderUserId] = useAdminUrlState<number | null>("order_user", null);
+  const [ledgerKind, setLedgerKind] = useAdminUrlState<string>("ledger_kind", "");
+  const [ledgerUserId, setLedgerUserId] = useAdminUrlState<number | null>("ledger_user", null);
+  const [orderPage, setOrderPage] = useAdminUrlState<number>("order_page", 1);
+  const [ledgerPage, setLedgerPage] = useAdminUrlState<number>("ledger_page", 1);
+  const [usagePage, setUsagePage] = useAdminUrlState<number>("usage_page", 1);
+  const [usageUserId, setUsageUserId] = useAdminUrlState<number | null>("usage_user", null);
+  const [usageTaskId, setUsageTaskId] = useAdminUrlState<string>("task_id", "");
+  const [usageDomain, setUsageDomain] = useAdminUrlState<string>("domain", "");
+  const [usageBillingKey, setUsageBillingKey] = useAdminUrlState<string>("billing_key", "");
+  const [usageCapability, setUsageCapability] = useAdminUrlState<string>("capability", "");
+  const [usageModel, setUsageModel] = useAdminUrlState<string>("model", "");
+  const [usageBasis, setUsageBasis] = useAdminUrlState<string>("basis", "");
+  const [usageDateFrom, setUsageDateFrom] = useAdminUrlState<string>("from", "");
+  const [usageDateTo, setUsageDateTo] = useAdminUrlState<string>("to", "");
+  const orderRequest = useAdminRequest<OrderRes>();
+  const ledgerRequest = useAdminRequest<LedgerRes>();
+  const usageRequest = useAdminRequest<AdminUsageEventListRes>();
+  const orders = orderRequest.data;
+  const ledger = ledgerRequest.data;
+  const usage = usageRequest.data;
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
+  const [orderDetailLoading, setOrderDetailLoading] = useState(false);
+  const [orderDetailError, setOrderDetailError] = useState<string | null>(null);
+  const [orderDetailRetry, setOrderDetailRetry] = useState(0);
   const [ledgerDetail, setLedgerDetail] = useState<AdminLedger | null>(null);
   const orderQuery = useAdminDetailQuery("order");
 
   // 按当前筛选加载充值订单，分页仍由服务端完成。
   async function loadOrders(page = orderPage) {
-    try {
-      setOrders(await listAdminOrders(page, { status: orderStatus, userId: orderUserId }));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载订单失败");
-    }
+    await orderRequest.run(() => listAdminOrders(page, { status: orderStatus, userId: orderUserId }));
   }
 
   // 加载钱包流水；与调账页、用户详情共享请求参数映射。
   async function loadLedger(page = ledgerPage) {
-    try {
-      setLedger(await listAdminLedger(page, { kind: ledgerKind, userId: ledgerUserId }));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载流水失败");
-    }
+    if (!canReadFinance) return;
+    await ledgerRequest.run(() => listAdminLedger(page, { kind: ledgerKind, userId: ledgerUserId }));
   }
 
   // 支持快捷筛选覆盖尚未提交到 React state 的用量条件。
@@ -81,8 +86,8 @@ export function OrdersPage() {
     page = usagePage,
     overrides?: { billing_key?: string; capability?: string; model?: string },
   ) {
-    try {
-      setUsage(await listAdminUsageEvents(page, {
+    if (!canReadFinance) return;
+    await usageRequest.run(() => listAdminUsageEvents(page, {
         userId: usageUserId,
         taskRunId: usageTaskId.trim(),
         domain: usageDomain,
@@ -92,59 +97,60 @@ export function OrdersPage() {
         billingBasis: usageBasis,
         dateFrom: usageDateFrom,
         dateTo: usageDateTo,
-      }));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载用量失败");
-    }
+    }));
   }
 
   useEffect(() => {
-    const next = tabFromSearch(searchParams.get("tab"));
-    setTab((prev) => (prev === next ? prev : next));
-  }, [searchParams]);
-
-  useEffect(() => {
-    void loadOrders();
+    if (tab === "orders") void loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderPage]);
+  }, [tab, orderPage]);
 
   useEffect(() => {
-    void loadLedger();
+    if (tab === "ledger") void loadLedger();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ledgerPage]);
+  }, [tab, ledgerPage]);
 
   useEffect(() => {
-    void loadUsage();
+    if (tab === "usage") void loadUsage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usagePage]);
+  }, [tab, usagePage]);
 
   useEffect(() => {
-    if (!orderQuery.id || !orders?.items) return;
-    const hit = orders.items.find((o) => o.id === orderQuery.id);
-    if (hit) setOrderDetail(hit);
-  }, [orderQuery.id, orders?.items]);
+    if (!orderQuery.id) { setOrderDetail(null); return; }
+    let cancelled = false;
+    setOrderDetail(null);
+    setOrderDetailLoading(true);
+    setOrderDetailError(null);
+    void api<AdminOrder>(`/api/admin/orders/${orderQuery.id}`)
+      .then((value) => { if (!cancelled) setOrderDetail(value); })
+      .catch((cause) => { if (!cancelled) setOrderDetailError(cause instanceof Error ? cause.message : "加载订单详情失败"); })
+      .finally(() => { if (!cancelled) setOrderDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [orderQuery.id, orderDetailRetry]);
 
+  const tradeNo = searchParams.get("trade");
   useEffect(() => {
-    const tradeNo = searchParams.get("trade");
     if (!tradeNo) return;
+    let cancelled = false;
     void (async () => {
       try {
         const res = await listAdminOrders(1, { pageSize: 1, outTradeNo: tradeNo });
         const hit = res.items[0];
-        if (hit) {
+        if (hit && !cancelled) {
           setOrderDetail(hit);
           orderQuery.open(hit.id);
-        }
-      } catch {
-        /* 深链失败时静默，用户仍可手动筛选 */
+        } else if (!cancelled) toast.error("未找到该商户订单");
+      } catch (cause) {
+        if (!cancelled) toast.error(cause instanceof Error ? cause.message : "订单定位失败");
       }
     })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [tradeNo]);
 
   // 将激活列表同步到 URL，保证刷新和跨页深链保持一致。
   function onTabChange(next: string) {
-    setTab(next);
+    if (next !== "orders" && !canReadFinance) return;
     const params = new URLSearchParams(searchParams);
     if (next === "orders") params.delete("tab");
     else params.set("tab", next);
@@ -157,8 +163,8 @@ export function OrdersPage() {
       <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList>
           <TabsTrigger value="orders">充值订单</TabsTrigger>
-          <TabsTrigger value="ledger">钱包流水</TabsTrigger>
-          <TabsTrigger value="usage">用量明细</TabsTrigger>
+          {canReadFinance ? <><TabsTrigger value="ledger">钱包流水</TabsTrigger>
+          <TabsTrigger value="usage">用量明细</TabsTrigger></> : null}
         </TabsList>
         <TabsContent value="orders" className="space-y-4">
           <AdminFilterBar>
@@ -174,13 +180,14 @@ export function OrdersPage() {
               variant="secondary"
               className="admin-filter-action"
               onClick={() => {
-                setOrderPage(1);
-                void loadOrders(1);
+                if (orderPage === 1) void loadOrders(1);
+                else setOrderPage(1);
               }}
             >
               筛选
             </Button>
           </AdminFilterBar>
+          <AdminListState loading={orderRequest.loading} error={orderRequest.error} empty={!orders?.items.length} emptyTitle="暂无匹配订单" onRetry={() => void loadOrders()}>
           <div className="rounded-lg border bg-background">
             <Table>
               <TableHeader>
@@ -234,7 +241,8 @@ export function OrdersPage() {
               </TableBody>
             </Table>
           </div>
-          {orders && (
+          </AdminListState>
+          {!orderRequest.loading && !orderRequest.error && orders && (
             <PaginationBar
               page={orders.meta.page}
               pageSize={orders.meta.page_size}
@@ -261,13 +269,14 @@ export function OrdersPage() {
               variant="secondary"
               className="admin-filter-action"
               onClick={() => {
-                setLedgerPage(1);
-                void loadLedger(1);
+                if (ledgerPage === 1) void loadLedger(1);
+                else setLedgerPage(1);
               }}
             >
               筛选
             </Button>
           </AdminFilterBar>
+          <AdminListState loading={ledgerRequest.loading} error={ledgerRequest.error} empty={!ledger?.items.length} emptyTitle="暂无匹配流水" onRetry={() => void loadLedger()}>
           <div className="rounded-lg border bg-background">
             <Table>
               <TableHeader>
@@ -307,7 +316,8 @@ export function OrdersPage() {
               </TableBody>
             </Table>
           </div>
-          {ledger && (
+          </AdminListState>
+          {!ledgerRequest.loading && !ledgerRequest.error && ledger && (
             <PaginationBar
               page={ledger.meta.page}
               pageSize={ledger.meta.page_size}
@@ -367,8 +377,8 @@ export function OrdersPage() {
                 setUsageBillingKey("llm_chat");
                 setUsageCapability("llm");
                 setUsageModel("");
-                setUsagePage(1);
-                void loadUsage(1, { billing_key: "llm_chat", capability: "llm", model: "" });
+                if (usagePage === 1) void loadUsage(1, { billing_key: "llm_chat", capability: "llm", model: "" });
+                else setUsagePage(1);
               }}
             >
               LLM 用量
@@ -381,8 +391,8 @@ export function OrdersPage() {
                 setUsageBillingKey("");
                 setUsageCapability("video");
                 setUsageModel("seedance-2.5");
-                setUsagePage(1);
-                void loadUsage(1, { billing_key: "", capability: "video", model: "seedance-2.5" });
+                if (usagePage === 1) void loadUsage(1, { billing_key: "", capability: "video", model: "seedance-2.5" });
+                else setUsagePage(1);
               }}
             >
               Seedance 2.5
@@ -392,13 +402,14 @@ export function OrdersPage() {
               variant="secondary"
               className="admin-filter-action"
               onClick={() => {
-                setUsagePage(1);
-                void loadUsage(1);
+                if (usagePage === 1) void loadUsage(1);
+                else setUsagePage(1);
               }}
             >
               筛选
             </Button>
           </AdminFilterBar>
+          <AdminListState loading={usageRequest.loading} error={usageRequest.error} empty={!usage?.items.length} emptyTitle="暂无匹配用量" onRetry={() => void loadUsage()}>
           <div className="rounded-lg border bg-background">
             <Table>
               <TableHeader>
@@ -470,7 +481,8 @@ export function OrdersPage() {
               </TableBody>
             </Table>
           </div>
-          {usage && (
+          </AdminListState>
+          {!usageRequest.loading && !usageRequest.error && usage && (
             <PaginationBar
               page={usage.meta.page}
               pageSize={usage.meta.page_size}
@@ -484,9 +496,12 @@ export function OrdersPage() {
       <OrderDetailDialog
         orderDetail={orderDetail}
         open={orderQuery.isOpen}
+        loading={orderDetailLoading}
+        error={orderDetailError}
+        onRetry={() => setOrderDetailRetry((value) => value + 1)}
         onClose={() => {
           setOrderDetail(null);
-          orderQuery.close();
+          setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete("order"); next.delete("trade"); return next; }, { replace: true });
         }}
       />
       <LedgerDetailDialog ledgerDetail={ledgerDetail} onClose={() => setLedgerDetail(null)} />
