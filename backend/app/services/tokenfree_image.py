@@ -8,8 +8,10 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 from app.services.tokenfree_video import uses_tokenfree_video
+from app.services.tokenfree_gateway import TOKENFREE_HOSTS
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +414,10 @@ async def post_until_not_rate_limited(
 def is_tokenfree_image_url(url: str) -> bool:
     """TokenFree 任务产物地址，下载建议带 Bearer。"""
     raw = (url or "").strip().lower()
-    if "tokenfree.com" not in raw:
+    try:
+        host = (urlsplit(raw).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if host not in TOKENFREE_HOSTS:
         return False
     return "/tasks/" in raw or "/responses/" in raw or "/artifacts/" in raw

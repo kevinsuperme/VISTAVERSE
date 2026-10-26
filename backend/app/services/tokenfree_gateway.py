@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from app.schemas_routing import SystemModelChannel
 
@@ -13,6 +14,7 @@ TOKENFREE_BASE_URL = "https://www.cattoken.vip/v1"
 TOKENFREE_CONSOLE_URL = "https://www.tokenfree.com/channels"
 # New API 内部额度：500000 quota = 1 USD
 TOKENFREE_QUOTA_PER_USD = 500_000
+TOKENFREE_HOSTS = frozenset({"cattoken.vip", "www.cattoken.vip", "tokenfree.com", "www.tokenfree.com"})
 
 
 def tokenfree_site_origin(base_url: str | None = None) -> str:
@@ -64,14 +66,18 @@ def locked_tokenfree_channel(
 
 
 def pick_migratable_api_key(channels: list[SystemModelChannel]) -> str:
-    """只迁 TokenFree 渠道或 base_url 含 tokenfree.com 的 Key，避免把 Moonshot/方舟 Key 写进去。"""
+    """只迁 TokenFree 渠道或已知 TokenFree 主机的 Key，避免误迁其它上游。"""
     for channel in channels:
         if channel.id == TOKENFREE_CHANNEL_ID and (channel.api_key or "").strip():
             return (channel.api_key or "").strip()
     for channel in channels:
         key = (channel.api_key or "").strip()
         base = (channel.base_url or "").strip().lower()
-        if key and "tokenfree.com" in base:
+        try:
+            host = (urlsplit(base).hostname or "").lower()
+        except ValueError:
+            host = ""
+        if key and host in TOKENFREE_HOSTS:
             return key
     return ""
 

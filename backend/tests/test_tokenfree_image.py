@@ -15,6 +15,7 @@ from app.services.tokenfree_image import (
     is_tokenfree_retryable_image_error,
     post_until_not_rate_limited,
     raise_tokenfree_image_if_failed,
+    is_tokenfree_image_url,
     tokenfree_image_channel_dead,
     tokenfree_image_user_error,
     tokenfree_working_image_model,
@@ -27,6 +28,12 @@ def test_uses_tokenfree_image_on_tokenfree_host():
     assert uses_tokenfree_image(base_url=TOKENFREE_BASE_URL) is True
     assert uses_tokenfree_image(channel_id=TOKENFREE_CHANNEL_ID) is True
     assert uses_tokenfree_image(base_url="https://ark.cn-beijing.volces.com/api/v3") is True
+
+
+def test_is_tokenfree_image_url_accepts_current_and_legacy_hosts_only():
+    assert is_tokenfree_image_url("https://www.cattoken.vip/v1/tasks/t1/artifacts/image-0/content") is True
+    assert is_tokenfree_image_url("https://www.tokenfree.com/v1/tasks/t1/artifacts/image-0/content") is True
+    assert is_tokenfree_image_url("https://cdn.example.com/v1/tasks/t1/artifacts/image-0/content") is False
 
 
 def test_build_tokenfree_image_body_matches_live_success():
