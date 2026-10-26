@@ -316,7 +316,7 @@ async def test_actual_ark_video_submit_records_gateway_body_and_provider_id(monk
             """结束 HTTP 上下文。"""
             return False
 
-    gateway = ark_module.ArkGateway(SimpleNamespace(ark_base_url="https://www.tokenfree.com/v1"))
+    gateway = ark_module.ArkGateway(SimpleNamespace(ark_base_url="https://www.cattoken.vip/v1"))
     monkeypatch.setattr(ark_module.ArkGateway, "mock", property(lambda _self: False))
     monkeypatch.setattr(gateway, "_resolve_ark_route", lambda *_args: None)
     monkeypatch.setattr(gateway, "_route_headers", lambda *_args: {"Authorization": "Bearer private-key"})

@@ -124,14 +124,14 @@ def test_extract_tokenfree_image_url_from_img_tag():
                     "content": [
                         {
                             "type": "output_text",
-                            "text": '<img src="https://www.tokenfree.com/v1/tasks/t1/artifacts/image-0/content?access=x" />',
+                            "text": '<img src="https://www.cattoken.vip/v1/tasks/t1/artifacts/image-0/content?access=x" />',
                         }
                     ]
                 }
             ]
         }
     )
-    assert url and url.startswith("https://www.tokenfree.com/v1/tasks/")
+    assert url and url.startswith("https://www.cattoken.vip/v1/tasks/")
 
 
 def test_extract_tokenfree_image_url_from_bare_https():
@@ -143,14 +143,14 @@ def test_extract_tokenfree_image_url_from_bare_https():
                     "content": [
                         {
                             "type": "output_text",
-                            "text": "https://www.tokenfree.com/v1/tasks/t2/artifacts/image-0/content?access=y",
+                            "text": "https://www.cattoken.vip/v1/tasks/t2/artifacts/image-0/content?access=y",
                         }
                     ]
                 }
             ]
         }
     )
-    assert url == "https://www.tokenfree.com/v1/tasks/t2/artifacts/image-0/content?access=y"
+    assert url == "https://www.cattoken.vip/v1/tasks/t2/artifacts/image-0/content?access=y"
 
 
 def test_failed_responses_payload_is_user_error_not_missing_url():
@@ -330,7 +330,7 @@ async def test_seedream_once_protocol_error_raises(monkeypatch):
     settings = Settings(
         ark_mock=False,
         ark_api_key="sk-test",
-        ark_base_url="https://www.tokenfree.com/v1",
+        ark_base_url="https://www.cattoken.vip/v1",
     )
     gw = ArkGateway(settings=settings)
 
@@ -385,7 +385,7 @@ async def test_seedream_once_http200_failed_task(monkeypatch):
     settings = Settings(
         ark_mock=False,
         ark_api_key="sk-test",
-        ark_base_url="https://www.tokenfree.com/v1",
+        ark_base_url="https://www.cattoken.vip/v1",
     )
     gw = ArkGateway(settings=settings)
 

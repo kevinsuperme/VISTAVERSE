@@ -15,7 +15,7 @@ def _tts_settings() -> Settings:
     return Settings(
         ark_mock=False,
         ark_api_key="sk-test",
-        ark_base_url="https://www.tokenfree.com/v1",
+        ark_base_url="https://www.cattoken.vip/v1",
     )
 
 

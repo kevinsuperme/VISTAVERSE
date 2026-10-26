@@ -65,7 +65,7 @@ def test_video_extra_refs_fall_back_to_prev_still():
 def test_shot_last_frame_ref_skips_tokenfree_url():
     """TokenFree 尾帧地址不能传给下一镜，退回已发布静帧。"""
     prev = _shot(
-        last_frame_url="https://www.tokenfree.com/v1/videos/abc/content",
+        last_frame_url="https://www.cattoken.vip/v1/videos/abc/content",
         image_ark_url="https://cdn.example.com/shot1.png",
     )
     assert shot_last_frame_ref(prev) == "https://cdn.example.com/shot1.png"
@@ -75,8 +75,8 @@ def test_shot_last_frame_ref_skips_tokenfree_url():
 def test_shot_last_frame_ref_prefers_local_still_over_tokenfree_ark():
     """TokenFree ark 静帧跳过，改用本地 /static。"""
     prev = _shot(
-        last_frame_url="https://www.tokenfree.com/v1/videos/abc/content",
-        image_ark_url="https://www.tokenfree.com/v1/tasks/t1/artifacts/image-0/content",
+        last_frame_url="https://www.cattoken.vip/v1/videos/abc/content",
+        image_ark_url="https://www.cattoken.vip/v1/tasks/t1/artifacts/image-0/content",
         image_url="/static/generated/p1/shot_001.png",
     )
     assert shot_last_frame_ref(prev) == "/static/generated/p1/shot_001.png"
@@ -89,7 +89,7 @@ def test_persist_last_frame_skips_tokenfree_content_url(monkeypatch):
         1,
         1,
         "/static/x.mp4",
-        preferred_url="https://www.tokenfree.com/v1/videos/abc/content",
+        preferred_url="https://www.cattoken.vip/v1/videos/abc/content",
     )
     assert out is None
 
@@ -97,7 +97,7 @@ def test_persist_last_frame_skips_tokenfree_content_url(monkeypatch):
 def test_shot_image_ref_skips_tokenfree_and_uses_oss():
     """TokenFree 产物地址不能给上游当参考，改用已发布的公网图。"""
     prev = _shot(
-        image_ark_url="https://www.tokenfree.com/v1/tasks/t1/artifacts/image-0/content",
+        image_ark_url="https://www.cattoken.vip/v1/tasks/t1/artifacts/image-0/content",
         image_url="https://cdn.example.com/shot1.png",
     )
     assert shot_image_ref(prev) == "https://cdn.example.com/shot1.png"

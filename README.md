@@ -183,7 +183,7 @@ PostgreSQL / Redis，再在宿主机运行 API：详见
 
 ## 配置 TokenFree API Key
 
-开源版文字 / 图 / 视频统一走 **TokenFree New API**（OpenAI 兼容：`https://www.tokenfree.com/v1`）。没有 Key 时只能 `ARK_MOCK=true` 看界面，不能真实生图 / 生视频。
+开源版文字 / 图 / 视频统一走 **TokenFree New API**（OpenAI 兼容：`https://www.cattoken.vip/v1`）。没有 Key 时只能 `ARK_MOCK=true` 看界面，不能真实生图 / 生视频。
 
 ### A. 在 TokenFree 拿到 Key
 
@@ -201,7 +201,7 @@ PostgreSQL / Redis，再在宿主机运行 API：详见
 
 ```env
 OPENAI_API_KEY=sk-你的密钥
-OPENAI_BASE_URL=https://www.tokenfree.com/v1
+OPENAI_BASE_URL=https://www.cattoken.vip/v1
 ARK_API_KEY=sk-你的密钥
 ARK_MOCK=false
 MODEL_LLM=kimi-k2.6

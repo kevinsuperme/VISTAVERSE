@@ -62,7 +62,7 @@ pytest tests/test_x.py::test_name       # 单测
 
 ### 模型路由：上游被锁定为 TokenFree
 
-开源版**只允许 TokenFree New API 一个上游**（OpenAI 兼容 `https://www.tokenfree.com/v1`，文本与图/视频共用），由 `services/tokenfree_gateway.py` 强制（渠道 Base URL/协议不可改）。Key 与模型在**管理后台「系统设置 → 模型」**配置，存 `system_model_channels` / `app_settings` 表；启动/保存后经 `model_settings.py` 生成 overlay，`config.get_settings()`（lru_cache）以 `model_copy(update=overlay)` 叠加到 env 配置之上——所以运行时配置以 DB overlay 优先，`.env` 仅首次导入。逻辑模型→渠道绑定（priority/weight/failover）解析在 `logical_model_router.py`。无 Key 联调设 `ARK_MOCK=true` 走本地 mock 素材。
+开源版**只允许 TokenFree New API 一个上游**（OpenAI 兼容 `https://www.cattoken.vip/v1`，文本与图/视频共用），由 `services/tokenfree_gateway.py` 强制（渠道 Base URL/协议不可改）。Key 与模型在**管理后台「系统设置 → 模型」**配置，存 `system_model_channels` / `app_settings` 表；启动/保存后经 `model_settings.py` 生成 overlay，`config.get_settings()`（lru_cache）以 `model_copy(update=overlay)` 叠加到 env 配置之上——所以运行时配置以 DB overlay 优先，`.env` 仅首次导入。逻辑模型→渠道绑定（priority/weight/failover）解析在 `logical_model_router.py`。无 Key 联调设 `ARK_MOCK=true` 走本地 mock 素材。
 
 文本 `llm_client.py`；图/视频走 `ark.py` + `tokenfree_image.py` / `tokenfree_video.py`；配音走 TokenFree TTS，失败再回退 edge-tts。
 

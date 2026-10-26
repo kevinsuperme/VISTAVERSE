@@ -166,7 +166,7 @@ docker compose --env-file deploy/.env.docker -f docker-compose.full.yml up -d --
 
 ## Configure TokenFree API Key
 
-The open-source build routes text / image / video through **TokenFree New API** (OpenAI-compatible: `https://www.tokenfree.com/v1`). Without a key you can only use `ARK_MOCK=true` for the UI — real generation will not work.
+The open-source build routes text / image / video through **TokenFree New API** (OpenAI-compatible: `https://www.cattoken.vip/v1`). Without a key you can only use `ARK_MOCK=true` for the UI — real generation will not work.
 
 ### A. Get a key from TokenFree
 
@@ -184,7 +184,7 @@ Edit `deploy/.env.docker`:
 
 ```env
 OPENAI_API_KEY=sk-your-key
-OPENAI_BASE_URL=https://www.tokenfree.com/v1
+OPENAI_BASE_URL=https://www.cattoken.vip/v1
 ARK_API_KEY=sk-your-key
 ARK_MOCK=false
 MODEL_LLM=kimi-k2.6

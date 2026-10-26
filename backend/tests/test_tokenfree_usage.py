@@ -21,8 +21,8 @@ from app.services.tokenfree_usage import (
 
 
 def test_tokenfree_site_origin_strips_v1():
-    assert tokenfree_site_origin("https://www.tokenfree.com/v1") == "https://www.tokenfree.com"
-    assert tokenfree_site_origin("https://www.tokenfree.com/v1/") == "https://www.tokenfree.com"
+    assert tokenfree_site_origin("https://www.cattoken.vip/v1") == "https://www.tokenfree.com"
+    assert tokenfree_site_origin("https://www.cattoken.vip/v1/") == "https://www.tokenfree.com"
 
 
 def test_quota_to_cost_fen_one_usd():
@@ -96,14 +96,14 @@ def test_pick_migratable_api_key_skips_moonshot_and_ark():
     tokenfree = SystemModelChannel(
         id="tokenfree",
         name="TokenFree",
-        base_url="https://www.tokenfree.com/v1",
+        base_url="https://www.cattoken.vip/v1",
         api_key="sk-tokenfree",
     )
     assert pick_migratable_api_key([moonshot, tokenfree]) == "sk-tokenfree"
     aliased = SystemModelChannel(
         id="legacy-openai",
         name="TF",
-        base_url="https://www.tokenfree.com/v1",
+        base_url="https://www.cattoken.vip/v1",
         api_key="sk-from-url",
     )
     assert pick_migratable_api_key([moonshot, aliased]) == "sk-from-url"

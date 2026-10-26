@@ -68,7 +68,7 @@ def ark_client(monkeypatch) -> ArkGateway:
     settings = SimpleNamespace(
         ark_video_poll_timeout=30.0,
         ark_video_poll_interval=0.0,
-        ark_base_url="https://www.tokenfree.com/v1",
+        ark_base_url="https://www.cattoken.vip/v1",
         ark_api_key="test-key",
     )
     client = ArkGateway(settings)

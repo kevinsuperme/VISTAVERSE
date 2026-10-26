@@ -15,7 +15,7 @@ def test_requested_gpt_image_keeps_upstream():
     channel = SystemModelChannel(
         id="tokenfree",
         name="TokenFree",
-        base_url="https://www.tokenfree.com/v1",
+        base_url="https://www.cattoken.vip/v1",
         api_key="sk-test",
         has_api_key=True,
         protocol="openai",

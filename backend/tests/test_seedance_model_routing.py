@@ -79,7 +79,7 @@ def test_resolve_upstream_model_routes_seedance_2(monkeypatch):
     channel = SystemModelChannel(
         id="tokenfree",
         name="TokenFree",
-        base_url="https://www.tokenfree.com/v1",
+        base_url="https://www.cattoken.vip/v1",
         api_key="test",
         api_format="openai",
         protocol="auto",

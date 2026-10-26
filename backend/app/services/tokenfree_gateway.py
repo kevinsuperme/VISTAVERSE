@@ -9,7 +9,7 @@ from app.schemas_routing import SystemModelChannel
 TOKENFREE_CHANNEL_ID = "tokenfree"
 TOKENFREE_CHANNEL_NAME = "TokenFree New API"
 # New API OpenAI 兼容根路径（/channels 是控制台，不是接口）
-TOKENFREE_BASE_URL = "https://www.tokenfree.com/v1"
+TOKENFREE_BASE_URL = "https://www.cattoken.vip/v1"
 TOKENFREE_CONSOLE_URL = "https://www.tokenfree.com/channels"
 # New API 内部额度：500000 quota = 1 USD
 TOKENFREE_QUOTA_PER_USD = 500_000

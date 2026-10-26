@@ -80,10 +80,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
 
     ark_api_key: str = ""
-    ark_base_url: str = "https://www.tokenfree.com/v1"
+    ark_base_url: str = "https://www.cattoken.vip/v1"
     # 文字模型：开源版固定 TokenFree New API，后台选模型
     openai_api_key: str = ""
-    openai_base_url: str = "https://www.tokenfree.com/v1"
+    openai_base_url: str = "https://www.cattoken.vip/v1"
     # 默认示例为 kimi；实际以后台渠道 models + 默认定稿为准，可改为 deepseek-chat 等
     model_llm: str = "kimi-k2.6"
     model_image: str = "doubao-seedream-5-0-260128"

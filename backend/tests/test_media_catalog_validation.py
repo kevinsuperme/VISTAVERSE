@@ -74,7 +74,7 @@ def test_catalog_payload_uses_tokenfree_routing() -> None:
             SystemModelChannel(
                 id="tokenfree",
                 name="TokenFree",
-                base_url="https://www.tokenfree.com/v1",
+                base_url="https://www.cattoken.vip/v1",
                 models=["doubao-seedance-2-5-260628"],
                 enabled=True,
             )
