@@ -23,6 +23,7 @@ from app.logging_setup import configure_logging
 from app.models import Template, User
 from app.observability import record_request, snapshot as observability_snapshot
 from app.rate_limit import check_auth_rate_limit
+from app.readiness import readiness_snapshot
 from app.startup_database_retry import run_database_startup_steps
 from app.services.tasks.runtime import runtime_summary, start_task_runtime, stop_task_runtime
 from app.services.templates_seed import TEMPLATES
@@ -203,15 +204,28 @@ async def on_startup() -> None:
     except Exception:  # noqa: BLE001
         pass
     await start_task_runtime()
+    from app.services.oss_queue import start_oss_workers
+
+    await start_oss_workers()
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
     """Release Postgres pool on uvicorn worker exit."""
     from app.database import dispose_engine
+    from app.services.oss_queue import stop_oss_workers
+    from app.services.progress import close_progress
 
-    await stop_task_runtime()
-    await dispose_engine()
+    try:
+        await stop_oss_workers()
+    finally:
+        try:
+            await stop_task_runtime()
+        finally:
+            try:
+                await close_progress()
+            finally:
+                await dispose_engine()
 
 
 async def _pg_columns(conn, table: str) -> set[str]:
@@ -453,12 +467,23 @@ async def seed_templates() -> None:
 
 @app.get("/api/health")
 async def health() -> dict:
-    """Public liveness endpoint used by the container health check.
+    """Public liveness endpoint; dependency readiness is checked separately.
 
     Keep deployment and model details behind the authenticated diagnostics
     endpoint below; this route is intentionally safe to expose at the edge.
     """
     return {"ok": True, "status": "ok"}
+
+
+@app.get("/api/ready")
+async def ready() -> JSONResponse:
+    """Public readiness, deliberately omitting dependency and deployment details."""
+    snapshot = await readiness_snapshot()
+    return JSONResponse(
+        {"ok": snapshot["ok"], "status": snapshot["status"]},
+        status_code=200 if snapshot["ok"] else 503,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/health/details")
@@ -472,9 +497,10 @@ async def health_details(_admin: User = Depends(get_current_admin)) -> dict:
 
     runtime = runtime_summary()
     metrics = observability_snapshot()
-    runtime_ok = bool(runtime.get("healthy"))
+    readiness = await readiness_snapshot()
     return {
-        "ok": runtime_ok,
+        "ok": readiness["ok"],
+        "readiness": readiness,
         "ark_mock": s.ark_mock,
         "db_pool": pool_status(),
         "media_disk": disk_status(),

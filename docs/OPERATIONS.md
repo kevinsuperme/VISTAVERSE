@@ -7,19 +7,23 @@
 ```bash
 cp deploy/.env.docker.example deploy/.env.docker
 # 编辑并替换所有 replace-with-* 值
-docker compose --env-file deploy/.env.docker up -d
-docker compose --env-file deploy/.env.docker ps
+python deploy/scripts/check_release.py build-metadata --output deploy/build.env
+# 按 deploy/README.md 的 immutable release 流程从已拉取镜像生成 release.lock.yml
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml config --quiet
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml ps
 curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:8000/api/ready
 ```
 
 拉取 API、用户端和管理端镜像时使用 `PRINTFILM_VERSION` 固定同一版本，例如：
 
 ```bash
-PRINTFILM_VERSION=0.2.0 docker compose --env-file deploy/.env.docker pull
-PRINTFILM_VERSION=0.2.0 docker compose --env-file deploy/.env.docker up -d
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml pull
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 ```
 
-改源码时使用 `docker-compose.full.yml` 构建。只需要库和缓存、API 由宿主机运行时，使用 `deploy/docker-compose.yml`，并将 `REDIS_URL` 写成带密码的 URL。
+改源码时先运行 `check_release.py build-metadata`，再使用 `docker-compose.full.yml` 构建。只需要库和缓存、API 由宿主机运行时，使用 `deploy/docker-compose.yml`，并将 `REDIS_URL` 写成带密码的 URL。
 
 ## Ubuntu 服务器部署（IP 测试环境）
 
@@ -90,7 +94,7 @@ FFMPEG_TIMEOUT_SEC=1800
 
 `postgres` / `redis` 这两个服务名只在 API 也运行于 Compose 网络时有效；宿主机
 API 必须使用 `127.0.0.1:15432` 和 `127.0.0.1:16379`。启动后用
-`GET /api/health` 验证迁移和连接池，再用管理员令牌访问
+`GET /api/ready` 主动验证数据库、Redis 和任务运行时，再用管理员令牌访问
 `GET /api/health/details`。生产模式下 `/docs`、`/redoc` 和 `/openapi.json` 为
 404，未签名的 `/static/generated/...` 为 403。
 
@@ -106,14 +110,14 @@ python -m pytest -q tests/test_kepu_shot_edit_demote.py
 python -m pytest -q
 ```
 
-若本地已存在 `printfilm-web:latest` 和 `printfilm-admin-web:latest`，可以把两个
+若本地已存在 与本次提交对应的 `printfilm-web:<release-tag>` 和 `printfilm-admin-web:<release-tag>`，可以把两个
 静态站点也放在 Docker 中，使用 `api:host-gateway` 访问宿主机 API：
 
 ```powershell
 docker run -d --name printfilm-web-local `
-  --add-host api:host-gateway -p 127.0.0.1:8080:80 printfilm-web:latest
+  --add-host api:host-gateway -p 127.0.0.1:8080:80 printfilm-web:<release-tag>
 docker run -d --name printfilm-admin-web-local `
-  --add-host api:host-gateway -p 127.0.0.1:8081:80 printfilm-admin-web:latest
+  --add-host api:host-gateway -p 127.0.0.1:8081:80 printfilm-admin-web:<release-tag>
 Invoke-WebRequest http://127.0.0.1:8080/api/health
 Invoke-WebRequest http://127.0.0.1:8081/api/health
 ```
@@ -135,28 +139,25 @@ docker compose -p printfilm-local-middleware `
 
 API 启动时先连接数据库，再按顺序执行 `init_db()`、模板/技能 seed 和增量 schema 迁移。增量迁移位于 `backend/app/main.py`：
 
-- `schema_migrations` 记录已完成的版本；当前版本为 1。
+- `schema_migrations` 记录已完成的版本；当前版本为 2。
 - 迁移使用 PostgreSQL advisory lock，同一数据库的多个 API 实例不会并发执行 DDL。
 - 现有列检查保持向后兼容，事务失败会整体回滚；不要在生产库手工删除迁移记录。
 - 新增 schema 时提高 `_SCHEMA_MIGRATION_VERSION`，增加一次性、可回滚的迁移分支，并在 `backend/tests/conftest.py` 的隔离库中验证。
 
-首次上线建议先以一个 API 实例执行迁移，确认 `/api/health` 返回成功后再启动其它 Web 服务。任务运行时是 FastAPI 进程内的 scheduler、executor、poller 和 watchdog；生产默认单 worker，重启前应观察任务是否已结算或取消。
+首次上线建议先以一个 API 实例执行迁移，确认 `/api/ready` 返回成功后再启动其它 Web 服务。任务运行时是 FastAPI 进程内的 scheduler、executor、poller 和 watchdog；生产默认单 worker，重启前应观察任务是否已结算或取消。
 
 ## 备份与恢复
 
-```bash
-# 仅示例，生产请把输出写入受控备份存储
-docker compose --env-file deploy/.env.docker exec -T postgres \
-  sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup.sql
-docker compose --env-file deploy/.env.docker exec -T postgres \
-  sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backup.sql
-```
+数据库备份必须包含 schema、业务表和迁移记录，并与媒体卷的同一备份批次关联。备份应加密、异机保存，限制凭据和读取权限，设定保留策略。仅存在 `.sql`/归档文件不代表可恢复。
 
-同时保留 `printfilm_media` 卷。恢复后先设置 `TASK_RUNTIME_ENABLED=false` 做只读核对，再确认项目、资产、任务和计费记录一致后恢复执行。
+恢复验证必须使用独立 Compose 项目、独立数据库/媒体卷和未对公网发布的端口；禁止把恢复命令直接指向生产 PostgreSQL。验证实例设置 `TASK_RUNTIME_ENABLED=false`、关闭支付/邮件/外部模型及 OSS 队列，再导入备份；核对 schema migration v2、关键业务行数、外键、媒体清单/校验和、认证后只读查询。记录备份时间、校验和、恢复耗时、RPO/RTO、失败项和审核人。演练通过后保留报告，按授权单独清理隔离卷。
+
+完整监控及隔离恢复验收流程见 [PRODUCTION_VERIFICATION.md](PRODUCTION_VERIFICATION.md)。该流程与脚本是待执行的操作材料，不能作为已经完成线上监控/恢复演练的证据。
 
 ## 运行检查
 
 - 存活：`GET /api/health`，不包含数据库和模型细节。
+- 就绪：`GET /api/ready`；主动执行有时限的数据库/Redis 检查，任务运行时未就绪时返回 503。Compose/Docker HEALTHCHECK 使用此接口；存活 200 不能替代依赖检查。
 - 管理诊断：管理员令牌访问 `GET /api/health/details`，查看 `db_pool`、`task_runtime`、`media_disk` 和请求错误/慢请求计数。
 - 日志：按 `request_id=<X-Request-ID>`、`task_id`、`provider_task_id` 检索；外部上游失败要同时核对对应 `UsageEvent` 的结算状态。
 - 媒体：确认本地 `backend/static/generated` 可写、FFmpeg/ffprobe 在 PATH，OSS 开启时确认异步队列能消费且失败会保留本地文件。
@@ -169,9 +170,17 @@ docker compose --env-file deploy/.env.docker exec -T postgres \
 
 ```bash
 docker compose --env-file deploy/.env.docker logs -f api
-docker compose --env-file deploy/.env.docker down       # 保留卷
-docker compose --env-file deploy/.env.docker up -d       # 重新启动
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml down       # 保留卷
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build       # 重新启动
 ```
 
 升级镜像前先备份数据库和媒体卷，固定 `PRINTFILM_VERSION`，执行健康检查和一条最小登录/任务查询流程；失败时回滚到上一镜像标签，不要删除数据卷。
 
+
+## 镜像发布与依赖持久性
+
+两套根 Compose 均要求显式填写 `PRINTFILM_VERSION`，不再默认 `latest` 或旧版本。生产使用 `git-<完整提交SHA>` 等唯一 tag，API/Web/Admin 必须来自同一提交；注册表必须开启 tag 不可覆盖策略。tag 本身并非 Docker 强制的不可变内容地址，发布证据还必须记录 `docker image inspect` 的 RepoDigests/Image ID，并在 registry 侧验证 tag 未被覆盖。每次本地构建也使用新 tag，禁止复用生产 tag。基础镜像仍固定版本标签，严格供应链部署应额外解析并锁定经过审核的 digest。
+
+Redis 改为 `noeviction`，避免队列在缓存压力下静默丢失；达到 512 MiB 上限时写请求会明确失败，因此必须监控 `used_memory`、`evicted_keys`、`rejected_connections`、AOF 写入状态及后台队列积压。Redis AOF 不替代 PostgreSQL/媒体备份，主机磁盘丢失仍会损失本机 AOF。
+
+上述配置仅在发布该版本后生效；本地检查不能证明服务器已完成镜像切换、监控接入或恢复演练。

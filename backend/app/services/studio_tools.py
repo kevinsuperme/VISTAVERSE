@@ -7,6 +7,8 @@ import io
 import logging
 import os
 import shutil
+import json
+import math
 import subprocess
 import uuid
 from pathlib import Path
@@ -182,6 +184,42 @@ def _magic_matches(ext: str, header: bytes) -> bool:
     return False
 
 
+def _probe_video(path: Path) -> None:
+    """Validate a real video container/stream with bounded local ffprobe."""
+    settings = get_settings()
+    timeout = max(1.0, min(float(settings.ffmpeg_timeout_sec), 15.0))
+    try:
+        result = subprocess.run(
+            [settings.ffprobe_path, "-v", "error", "-protocol_whitelist", "file,pipe",
+             "-probesize", "1048576", "-analyzeduration", "3000000",
+             "-show_entries", "stream=codec_type,width,height:format=format_name,duration",
+             "-of", "json", str(path)],
+            capture_output=True, timeout=timeout, check=True,
+        )
+        data = json.loads(result.stdout)
+    except FileNotFoundError as exc:
+        raise RuntimeError("视频校验服务不可用") from exc
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise ValueError("文件不是有效视频或校验超时") from exc
+    formats = set(str((data.get("format") or {}).get("format_name") or "").split(","))
+    if not formats.intersection({"mp4", "mov", "webm"}):
+        raise ValueError("不支持的视频容器")
+    streams = data.get("streams") or []
+    av_streams = [stream for stream in streams if stream.get("codec_type") in {"video", "audio"}]
+    if not av_streams or not any(stream.get("codec_type") == "video" for stream in av_streams):
+        raise ValueError("文件不包含有效视频流")
+    if len(av_streams) != len(streams):
+        raise ValueError("视频包含不支持的附加流")
+    for stream in av_streams:
+        if stream.get("codec_type") == "video":
+            width, height = int(stream.get("width") or 0), int(stream.get("height") or 0)
+            if width <= 0 or height <= 0 or width > 8192 or height > 8192:
+                raise ValueError("视频尺寸过大或无效")
+    duration = float((data.get("format") or {}).get("duration") or 0)
+    if not math.isfinite(duration) or duration <= 0 or duration > 3600:
+        raise ValueError("视频时长须在 0 到 3600 秒内")
+
+
 def _save_upload_stream(
     fileobj: BinaryIO,
     user_id: int,
@@ -231,7 +269,14 @@ def _save_upload_stream(
             raise ValueError("上传文件不能为空")
         if not _magic_matches(ext, bytes(header)):
             raise ValueError("文件内容与扩展名不匹配")
-        part.replace(dest)
+        if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+            from app.services.avatar_upload import normalize_avatar
+            with part.open("rb") as original:
+                dest = normalize_avatar(original, root, prefix="reference", max_dimension=None)
+            part.unlink(missing_ok=True)
+        else:
+            _probe_video(part)
+            part.replace(dest)
         return dest, total
     except Exception:
         part.unlink(missing_ok=True)

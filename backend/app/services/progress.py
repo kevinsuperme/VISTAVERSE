@@ -1,108 +1,116 @@
-"""Progress pub/sub — Redis when available, else in-process queues."""
-
+"""Bounded progress pub/sub; Redis failures never block the event loop."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from collections import defaultdict
+import time
+from collections import OrderedDict
 from typing import Any
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-_queues: dict[int, list[asyncio.Queue]] = defaultdict(list)
-_latest: dict[int, dict[str, Any]] = {}
+_QUEUE_SIZE = 64
+_LATEST_LIMIT = 1024
+_LATEST_TTL = 3600
+_queues: dict[int, list[asyncio.Queue]] = {}
+_latest: OrderedDict[int, tuple[float, dict[str, Any]]] = OrderedDict()
 _redis = None
-_redis_failed = False
 
 
 def _get_redis():
-    global _redis, _redis_failed
-    if _redis_failed:
-        return None
-    if _redis is not None:
-        return _redis
-    try:
-        import redis
-
-        client = redis.Redis.from_url(
-            get_settings().redis_url,
-            decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2,
+    global _redis
+    if _redis is None:
+        from redis.asyncio import Redis
+        _redis = Redis.from_url(
+            get_settings().redis_url, decode_responses=True,
+            socket_connect_timeout=2, socket_timeout=2,
+            max_connections=128, health_check_interval=15,
         )
-        client.ping()
-        _redis = client
-        return _redis
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Redis unavailable for progress: %s", exc)
-        _redis_failed = True
-        return None
+    return _redis
 
 
 def channel(project_id: int) -> str:
     return f"framecut:progress:{project_id}"
 
 
-async def publish_progress(project_id: int, payload: dict[str, Any]) -> None:
-    _latest[project_id] = payload
-    r = _get_redis()
-    if r is not None:
-        try:
-            r.publish(channel(project_id), json.dumps(payload, ensure_ascii=False))
-            r.setex(f"framecut:latest:{project_id}", 3600, json.dumps(payload, ensure_ascii=False))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Redis publish failed: %s", exc)
+def _offer(q: asyncio.Queue, payload: dict[str, Any]) -> None:
+    # Progress is a snapshot: keep the newest state when a consumer is slow.
+    if q.full():
+        q.get_nowait()
+    q.put_nowait(payload)
 
-    dead: list[asyncio.Queue] = []
-    for q in _queues[project_id]:
-        try:
-            q.put_nowait(payload)
-        except Exception:  # noqa: BLE001
-            dead.append(q)
-    for q in dead:
-        _queues[project_id].remove(q)
+
+def _prune_latest() -> None:
+    cutoff = time.monotonic() - _LATEST_TTL
+    while _latest and (len(_latest) > _LATEST_LIMIT or next(iter(_latest.values()))[0] < cutoff):
+        _latest.popitem(last=False)
+
+
+async def publish_progress(project_id: int, payload: dict[str, Any]) -> None:
+    _latest[project_id] = (time.monotonic(), payload)
+    _latest.move_to_end(project_id)
+    _prune_latest()
+    for q in tuple(_queues.get(project_id, ())):
+        _offer(q, payload)
+    try:
+        r = _get_redis()
+        raw = json.dumps(payload, ensure_ascii=False)
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.setex(f"framecut:latest:{project_id}", _LATEST_TTL, raw)
+            pipe.publish(channel(project_id), raw)
+            await pipe.execute()
+    except Exception as exc:  # Redis client reconnects on the next operation.
+        logger.warning("Progress Redis publish unavailable (%s)", type(exc).__name__)
 
 
 def subscribe(project_id: int) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    _queues[project_id].append(q)
-    r = _get_redis()
-    if r is not None:
-        try:
-            raw = r.get(f"framecut:latest:{project_id}")
-            if raw:
-                q.put_nowait(json.loads(raw))
-        except Exception:  # noqa: BLE001
-            pass
-    elif project_id in _latest:
-        q.put_nowait(_latest[project_id])
+    q: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_SIZE)
+    _queues.setdefault(project_id, []).append(q)
+    _prune_latest()
+    if project_id in _latest:
+        _offer(q, _latest[project_id][1])
     return q
 
 
 def unsubscribe(project_id: int, q: asyncio.Queue) -> None:
-    if q in _queues[project_id]:
-        _queues[project_id].remove(q)
+    subscribers = _queues.get(project_id)
+    if subscribers and q in subscribers:
+        subscribers.remove(q)
+        if not subscribers:
+            _queues.pop(project_id, None)
 
 
 async def redis_bridge(project_id: int, q: asyncio.Queue) -> None:
-    """Background task: forward Redis pubsub messages into local queue."""
-    r = _get_redis()
-    if r is None:
-        return
-    pubsub = r.pubsub()
-    pubsub.subscribe(channel(project_id))
-    try:
-        while True:
-            msg = await asyncio.to_thread(pubsub.get_message, ignore_subscribe_messages=True, timeout=1.0)
-            if msg and msg.get("type") == "message":
-                data = msg.get("data")
-                if isinstance(data, str):
-                    q.put_nowait(json.loads(data))
-            await asyncio.sleep(0.05)
-    except asyncio.CancelledError:
-        pubsub.unsubscribe(channel(project_id))
-        pubsub.close()
-        raise
+    """Subscribe before loading the snapshot; reconnect after transient failures."""
+    delay = 1
+    while True:
+        try:
+            r = _get_redis()
+            async with r.pubsub() as pubsub:
+                await pubsub.subscribe(channel(project_id))
+                raw = await r.get(f"framecut:latest:{project_id}")
+                if raw:
+                    _offer(q, json.loads(raw))
+                delay = 1
+                while True:
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if msg and msg.get("type") == "message":
+                        data = msg.get("data")
+                        if isinstance(data, str):
+                            _offer(q, json.loads(data))
+                    await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Progress Redis bridge reconnecting (%s)", type(exc).__name__)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30)
+
+
+async def close_progress() -> None:
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None

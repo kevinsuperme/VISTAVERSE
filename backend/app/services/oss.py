@@ -1,6 +1,6 @@
 """Aliyun OSS upload helpers.
 
-Local files stay on disk for FFmpeg; DB / frontend use public OSS URLs.
+Local files stay on disk for FFmpeg; DB stores object URLs; clients receive short-lived signed URLs.
 Object key layout: {folder}/generated/p{id}/... and {folder}/ for SPA.
 """
 
@@ -11,6 +11,7 @@ import mimetypes
 from functools import lru_cache
 from io import BufferedIOBase
 from pathlib import Path
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from app.config import get_settings
 
@@ -30,7 +31,8 @@ def _bucket():
     endpoint = s.oss_endpoint.strip()
     if not endpoint.startswith("http"):
         endpoint = f"https://{endpoint}"
-    return oss2.Bucket(auth, endpoint, s.oss_bucket)
+    # oss2 applies this timeout to socket operations; it is not a total upload deadline.
+    return oss2.Bucket(auth, endpoint, s.oss_bucket, connect_timeout=15)
 
 
 def reset_oss_client() -> None:
@@ -65,25 +67,26 @@ def public_base() -> str:
 
 def public_url(object_key: str) -> str:
     key = object_key.lstrip("/")
-    return f"{public_base()}/{key}"
+    return f"{public_base()}/{quote(key, safe='/')}"
 
 
 def signed_public_url(object_key: str, *, expires: int = 900) -> str:
-    """Create a short-lived GET URL for a private or public OSS object.
-
-    Uploads remain public-read for backwards compatibility unless deployment
-    switches the bucket policy; callers may use this helper when returning
-    user media to the browser without exposing a durable object URL.
-    """
+    """Create a short-lived capability; signing failures must never grant public access."""
     key = object_key.lstrip("/")
     if not oss_enabled():
-        return public_url(key)
+        raise RuntimeError("OSS signing unavailable")
     ttl = max(60, min(int(expires), 86_400))
     try:
-        return _bucket().sign_url("GET", key, ttl, slash_safe=True)
+        # V1 OSS signatures bind the canonical bucket/key, not delivery host.
+        # Sign using the authenticated client, then map to configured public CDN/CNAME.
+        signed = urlsplit(_bucket().sign_url("GET", key, ttl, slash_safe=True))
+        public = urlsplit(public_url(key))
+        if public.scheme != "https" or not public.netloc:
+            raise RuntimeError("OSS public base must use HTTPS")
+        return urlunsplit((public.scheme, public.netloc, public.path, signed.query, ""))
     except Exception as exc:  # noqa: BLE001
-        logger.warning("OSS signed URL failed for key=%s: %s", key, exc)
-        return public_url(key)
+        logger.warning("OSS signed URL failed (%s)", type(exc).__name__)
+        raise RuntimeError("OSS signing unavailable") from exc
 
 
 def ensure_browser_cors() -> None:
@@ -144,7 +147,7 @@ def key_for_local(path: Path, *, static_root: Path) -> str:
 
 
 def upload_file(local_path: Path, object_key: str | None = None) -> str:
-    """Upload local file; return public URL. Raises on failure."""
+    """Upload local file; return a canonical object URL (sign only at access boundaries). Raises on failure."""
     from app.services import storage
 
     path = Path(local_path)
@@ -155,18 +158,18 @@ def upload_file(local_path: Path, object_key: str | None = None) -> str:
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     headers = {
         "Content-Type": mime,
-        "x-oss-object-acl": "public-read",
+        "x-oss-object-acl": "private",
     }
     bucket = _bucket()
     bucket.put_object_from_file(key, str(path), headers=headers)
     url = public_url(key)
-    logger.info("oss uploaded %s → %s", path.name, url)
+    logger.info("oss uploaded file=%s", path.name)
     return url
 
 
 def upload_bytes(data: bytes, object_key: str, *, content_type: str = "application/octet-stream") -> str:
     key = object_key.lstrip("/")
-    headers = {"Content-Type": content_type, "x-oss-object-acl": "public-read"}
+    headers = {"Content-Type": content_type, "x-oss-object-acl": "private"}
     _bucket().put_object(key, data, headers=headers)
     return public_url(key)
 
@@ -174,7 +177,7 @@ def upload_bytes(data: bytes, object_key: str, *, content_type: str = "applicati
 # 直接将文件对象流式上传到 OSS，避免先整文件读入内存。
 def upload_fileobj(fileobj: BufferedIOBase, object_key: str, *, content_type: str = "application/octet-stream") -> str:
     key = object_key.lstrip("/")
-    headers = {"Content-Type": content_type, "x-oss-object-acl": "public-read"}
+    headers = {"Content-Type": content_type, "x-oss-object-acl": "private"}
     _bucket().put_object(key, fileobj, headers=headers)
     return public_url(key)
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -187,7 +186,7 @@ async def upload_asset_media(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DramaAssetOut:
-    """上传图片或音频到 OSS（不落本地）；音频资产不写 cover。"""
+    """校验并上传图片或音频到 OSS（仅使用临时文件）；音频资产不写 cover。"""
     from app.models_drama import DramaProject
     from app.services import oss as oss_svc
 
@@ -208,85 +207,25 @@ async def upload_asset_media(
     if status in {"queued", "running", "generating"}:
         raise HTTPException(status_code=409, detail="形象生成中，请稍后再更换图片")
 
-    content_type = (file.content_type or "").lower()
-    image_allowed = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-    }
-    audio_allowed = {
-        "audio/mpeg": ".mp3",
-        "audio/mp3": ".mp3",
-        "audio/wav": ".wav",
-        "audio/x-wav": ".wav",
-        "audio/wave": ".wav",
-        "audio/mp4": ".m4a",
-        "audio/m4a": ".m4a",
-        "audio/x-m4a": ".m4a",
-        "audio/aac": ".aac",
-        "audio/ogg": ".ogg",
-        "audio/webm": ".webm",
-    }
-    ext = image_allowed.get(content_type) or audio_allowed.get(content_type)
-    is_audio = content_type in audio_allowed
-    if not ext:
-        suffix = Path(file.filename or "").suffix.lower()
-        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-            ext = ".jpg" if suffix == ".jpeg" else suffix
-            content_type = {
-                ".jpg": "image/jpeg",
-                ".png": "image/png",
-                ".webp": "image/webp",
-                ".gif": "image/gif",
-            }.get(ext, "application/octet-stream")
-            is_audio = False
-        elif suffix in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".webm"}:
-            ext = suffix
-            content_type = {
-                ".mp3": "audio/mpeg",
-                ".wav": "audio/wav",
-                ".m4a": "audio/mp4",
-                ".aac": "audio/aac",
-                ".ogg": "audio/ogg",
-                ".webm": "audio/webm",
-            }.get(ext, "application/octet-stream")
-            is_audio = True
-        else:
-            raise HTTPException(status_code=400, detail="仅支持图片（JPG/PNG/WebP/GIF）或音频（MP3/WAV/M4A 等）")
+    from app.services.asset_upload import validate_and_upload_asset
 
-    # 直接检查上传临时文件大小，避免先把整文件读入内存。
-    upload_fp = file.file
-    try:
-        upload_fp.seek(0, 2)
-        size = upload_fp.tell()
-        upload_fp.seek(0)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"无法读取上传文件：{exc}") from exc
-    if size <= 0:
-        raise HTTPException(status_code=400, detail="空文件")
-    max_bytes = 30 * 1024 * 1024 if is_audio else 20 * 1024 * 1024
-    if size > max_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="音频不能超过 30MB" if is_audio else "文件不能超过 20MB",
+    def validated_upload(stream, extension, content_type):
+        object_key = (
+            f"{oss_svc.folder_prefix()}/generated/p{asset.project_id}/"
+            f"asset_{asset.id}_{uuid.uuid4().hex[:10]}{extension}"
         )
+        return oss_svc.upload_fileobj(stream, object_key, content_type=content_type)
 
-    object_key = (
-        f"{oss_svc.folder_prefix()}/generated/p{asset.project_id}/"
-        f"asset_{asset.id}_{uuid.uuid4().hex[:10]}{ext}"
-    )
     try:
-        # OSS SDK 为同步阻塞 IO，放到线程池里避免阻塞事件循环。
-        url = await run_in_threadpool(
-            oss_svc.upload_fileobj,
-            upload_fp,
-            object_key,
-            content_type=content_type or "application/octet-stream",
-        )
+        url, is_audio = await run_in_threadpool(validate_and_upload_asset, file.file, validated_upload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="媒体校验或存储服务不可用") from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"OSS 上传失败：{exc}") from exc
+        raise HTTPException(status_code=502, detail="媒体上传失败，请稍后重试") from exc
+    finally:
+        await file.close()
 
     from app.services.drama.generation import archive_asset_image_version
 

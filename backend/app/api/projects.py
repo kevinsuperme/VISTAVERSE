@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
+from app.services.avatar_upload import receive_image_upload
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Project, ProjectStatus, Shot, ShotStatus, UsageEvent, User, Work
@@ -481,41 +482,9 @@ async def upload_project_cover(
     }:
         raise HTTPException(status_code=409, detail="生成进行中，无法更换封面")
 
-    content_type = (file.content_type or "").lower()
-    allowed = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-    }
-    ext = allowed.get(content_type)
-    if not ext:
-        # Fallback from filename
-        suffix = Path(file.filename or "").suffix.lower()
-        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-            ext = ".jpg" if suffix == ".jpeg" else suffix
-        else:
-            raise HTTPException(status_code=400, detail="仅支持 JPG / PNG / WebP / GIF")
-
-    max_bytes = 8 * 1024 * 1024
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(min(1024 * 1024, max_bytes + 1 - total))
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(status_code=400, detail="封面不能超过 8MB")
-    raw = b"".join(chunks)
-    if not raw:
-        raise HTTPException(status_code=400, detail="空文件")
-
-    dest = storage.project_dir(project_id) / f"cover{ext}"
-    dest.write_bytes(raw)
-    project.cover_url = storage.publish_local(dest)
+    dest = await receive_image_upload(file, storage.project_dir(project_id),
+                                      max_bytes=8 * 1024 * 1024, prefix="cover")
+    project.cover_url = await asyncio.to_thread(storage.publish_local, dest)
     await db.commit()
     return await _get_owned_project(db, project_id, user)
 
@@ -683,7 +652,12 @@ async def project_events(
                     yield {"event": "ping", "data": "{}"}
         finally:
             bridge.cancel()
-            unsubscribe(project_id, queue)
+            try:
+                await bridge
+            except asyncio.CancelledError:
+                pass
+            finally:
+                unsubscribe(project_id, queue)
 
     return EventSourceResponse(event_generator())
 
@@ -764,32 +738,9 @@ async def upload_shot_image(
     shot = next((s for s in project.shots if s.id == shot_id), None)
     if not shot:
         raise HTTPException(status_code=404, detail="分镜不存在")
-    content_type = (file.content_type or "").lower()
-    allowed = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-    }
-    ext = allowed.get(content_type)
-    if not ext:
-        suffix = Path(file.filename or "").suffix.lower()
-        ext = ".jpg" if suffix == ".jpeg" else suffix if suffix in {".jpg", ".png", ".webp", ".gif"} else ""
-    if not ext:
-        raise HTTPException(status_code=400, detail="仅支持 JPG / PNG / WebP / GIF")
-    raw = await file.read(8 * 1024 * 1024 + 1)
-    if not raw:
-        raise HTTPException(status_code=400, detail="空文件")
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="画面不能超过 8MB")
-    sniffed = _image_ext_from_magic(raw)
-    if not sniffed:
-        raise HTTPException(status_code=400, detail="文件不是有效图片")
-    ext = sniffed
-    dest = storage.project_dir(project_id) / f"shot_{shot.id}_upload{ext}"
-    dest.write_bytes(raw)
-    shot.image_url = storage.publish_local(dest)
+    dest = await receive_image_upload(file, storage.project_dir(project_id),
+                                      max_bytes=8 * 1024 * 1024, prefix=f"shot_{shot.id}_upload")
+    shot.image_url = await asyncio.to_thread(storage.publish_local, dest)
     shot.image_ark_url = None
     shot.video_url = None
     shot.last_frame_url = None

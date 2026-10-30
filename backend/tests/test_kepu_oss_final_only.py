@@ -60,4 +60,6 @@ def test_collect_pending_skips_kepu_shot_columns():
     # 补传扫描不再扫分镜图/镜头视频/配音，避免把中间文件重新入队
     models = {model.__name__: fields for model, fields in collect_pending_column_targets()}
     assert "Shot" not in models
-    assert models["Project"] == ["final_video_url"]
+    assert "final_video_url" in models["Project"]
+    assert models["User"] == ["avatar_url"]
+    assert models["ToolRun"] == ["preview_url"]

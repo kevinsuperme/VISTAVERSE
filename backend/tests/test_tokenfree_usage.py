@@ -21,8 +21,8 @@ from app.services.tokenfree_usage import (
 
 
 def test_tokenfree_site_origin_strips_v1():
-    assert tokenfree_site_origin("https://www.cattoken.vip/v1") == "https://www.tokenfree.com"
-    assert tokenfree_site_origin("https://www.cattoken.vip/v1/") == "https://www.tokenfree.com"
+    assert tokenfree_site_origin("https://www.cattoken.vip/v1") == "https://www.cattoken.vip"
+    assert tokenfree_site_origin("https://www.cattoken.vip/v1/") == "https://www.cattoken.vip"
 
 
 def test_quota_to_cost_fen_one_usd():

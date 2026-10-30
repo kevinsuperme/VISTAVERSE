@@ -125,7 +125,8 @@ async def upload_skill_file(
     filename = (file.filename or "").lower()
     if filename and not filename.endswith((".md", ".markdown", ".txt")):
         raise HTTPException(status_code=400, detail="请上传 .md 文件")
-    raw = await file.read()
+    raw = await file.read(200 * 1024 + 1)
+    await file.close()
     if len(raw) > 200 * 1024:
         raise HTTPException(status_code=400, detail="文件不能超过 200KB")
     try:

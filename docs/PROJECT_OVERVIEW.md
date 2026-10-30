@@ -133,7 +133,7 @@ React 管理端 ─┘                  │        └→ Redis（进度与队�
 ```bash
 cp deploy/.env.docker.example deploy/.env.docker
 # 修改数据库密码、Redis 密码、SECRET_KEY 和 API Key
-docker compose --env-file deploy/.env.docker up -d
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 ```
 
 地址：用户端 `http://localhost:8080`、管理端 `http://localhost:8081`、API `http://localhost:8000`。生产模式默认关闭 `/docs`、`/redoc` 和 `/openapi.json`，媒体签名由 `MEDIA_REQUIRE_SIGNATURE=true` 控制。
@@ -149,7 +149,7 @@ Set-Location backend
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-宿主机连接端口为 PostgreSQL `15432`、Redis `16379`。若已有本地 `printfilm-web:latest` 与 `printfilm-admin-web:latest`，可使用 `api:host-gateway` 将静态站点容器反代到宿主机 API，具体命令见 [deploy/README.md](../deploy/README.md)。
+宿主机连接端口为 PostgreSQL `15432`、Redis `16379`。若已有与当前提交对应的 `printfilm-web:<release-tag>` 与 `printfilm-admin-web:<release-tag>`，可使用 `api:host-gateway` 将静态站点容器反代到宿主机 API，具体命令见 [deploy/README.md](../deploy/README.md)。
 
 ## 7. 测试与质量门禁
 

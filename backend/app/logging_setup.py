@@ -3,9 +3,31 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 
 _configured = False
+
+
+def redact_log_text(value: str) -> str:
+    """Remove capability URLs, credentials and mailboxes, including exception text."""
+    value = re.sub(r"(?i)\b(?:redis|rediss|postgres|postgresql)(?:\+[a-z0-9]+)?://[^\s<>\"']+", "[dsn-redacted]", value)
+    value = re.sub(r"https?://[^\s<>\"']+", "[url-redacted]", value, flags=re.I)
+    value = re.sub(r"(?:/[^\s?<>\"']*)?\?[^\s<>\"']+", "[query-redacted]", value)
+    value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email-redacted]", value)
+    value = re.sub(r"(?i)(authorization[=: ]+)(?:bearer\s+)?[^\s,;]+", r"\1[redacted]", value)
+    return value
+
+
+class RedactingFormatter(logging.Formatter):
+    """Redact after rendering so exception traceback messages are covered too."""
+
+    def __init__(self, delegate: logging.Formatter):
+        super().__init__()
+        self.delegate = delegate
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_log_text(self.delegate.format(record))
 
 
 def configure_logging(*, level: str = "INFO", sql_echo: bool = False) -> None:
@@ -22,6 +44,13 @@ def configure_logging(*, level: str = "INFO", sql_echo: bool = False) -> None:
             )
         )
         root.addHandler(handler)
+
+    # Uvicorn has non-propagating access/error handlers as well as root handlers.
+    for target in (root, logging.getLogger("uvicorn"), logging.getLogger("uvicorn.access"),
+                   logging.getLogger("uvicorn.error")):
+        for handler in target.handlers:
+            if not isinstance(handler.formatter, RedactingFormatter):
+                handler.setFormatter(RedactingFormatter(handler.formatter or logging.Formatter()))
 
     # 根级别用 INFO：DEBUG=true 也不刷第三方库
     root.setLevel(logging.INFO)

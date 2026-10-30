@@ -119,8 +119,10 @@ No key yet, just want the UI? Set `ARK_MOCK=true`.
 
 ### 2. Start
 
+Before starting, generate and review `deploy/release.lock.yml` and `deploy/release.record.json` from real image digests using the [immutable release workflow](deploy/README.md#immutable-releases). `PRINTFILM_VERSION` is required with no default; placeholder tags and `latest` are rejected.
+
 ```bash
-docker compose --env-file deploy/.env.docker up -d
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 ```
 
 Wait about half a minute (web / admin start after the API health check passes).
@@ -145,15 +147,15 @@ docker compose --env-file deploy/.env.docker down        # stop (keep volumes)
 | Role | How |
 |------|-----|
 | User | Open the app → `/auth` and register with email |
-| Admin | Register that email first → set `ADMIN_BOOTSTRAP_EMAILS=your@email` in `.env.docker` → `docker compose --env-file deploy/.env.docker up -d --force-recreate api` (**promotes only; does not create accounts**) |
+| Admin | Register that email first → set `ADMIN_BOOTSTRAP_EMAILS=your@email` in `.env.docker` → `docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build --force-recreate api` (**promotes only; does not create accounts**) |
 
 No built-in demo accounts; change secrets immediately for production.
 
-### 4. Update to latest images
+### 4. Update to a digest-locked release
 
 ```bash
-docker compose --env-file deploy/.env.docker pull
-docker compose --env-file deploy/.env.docker up -d
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml pull
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 ```
 
 ### 5. Build from source (optional)
@@ -161,7 +163,8 @@ docker compose --env-file deploy/.env.docker up -d
 When you changed frontend/backend code, or cannot pull from ACR:
 
 ```bash
-docker compose --env-file deploy/.env.docker -f docker-compose.full.yml up -d --build
+python deploy/scripts/check_release.py build-metadata --output deploy/build.env
+docker compose --env-file deploy/.env.docker --env-file deploy/build.env -f docker-compose.full.yml up -d --build
 ```
 
 ## Configure TokenFree API Key
@@ -195,7 +198,7 @@ MODEL_VIDEO=seedance-2-5
 Use the **same** value for `OPENAI_API_KEY` and `ARK_API_KEY`. Recreate the API container:
 
 ```bash
-docker compose --env-file deploy/.env.docker up -d --force-recreate api
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build --force-recreate api
 ```
 
 Open http://localhost:8000/api/health for liveness. Model and task details require an administrator token at `/api/health/details`; production disables `/docs`, `/redoc`, and `/openapi.json` by default.

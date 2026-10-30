@@ -106,9 +106,9 @@ Docker 中，并把 `/api` 反代到宿主机 API（`api:host-gateway`）：
 
 ```powershell
 docker run -d --name printfilm-web-local `
-  --add-host api:host-gateway -p 127.0.0.1:8080:80 printfilm-web:latest
+  --add-host api:host-gateway -p 127.0.0.1:8080:80 printfilm-web:${PRINTFILM_VERSION}
 docker run -d --name printfilm-admin-web-local `
-  --add-host api:host-gateway -p 127.0.0.1:8081:80 printfilm-admin-web:latest
+  --add-host api:host-gateway -p 127.0.0.1:8081:80 printfilm-admin-web:${PRINTFILM_VERSION}
 
 Invoke-WebRequest http://127.0.0.1:8080/api/health
 Invoke-WebRequest http://127.0.0.1:8081/api/health
@@ -199,3 +199,54 @@ cd frontend && npm run build
 cd ../backend && .venv/bin/python ../deploy/scripts/upload_oss_web.py
 # → https://{bucket}.oss-cn-beijing.aliyuncs.com/kepu/index.html
 ```
+
+<a id="immutable-releases"></a>
+## 不可变发布镜像与发布记录
+
+`PRINTFILM_VERSION` 没有默认值。版本标签只是查找入口，生产部署必须追加 digest lock overlay，避免标签被重新推送后实际内容变化。下列脚本只读查询 Git/Docker 镜像元数据并在本地新建文件，不 pull、不 build、不启动服务、不读取容器 env。Docker daemon 不可用时会失败，不会捏造 digest。
+
+### 从发布仓库锁定版本
+
+先从可信 CI 取得完整 Git revision 和同一发布的三个应用镜像标签，将版本写入 `deploy/.env.docker`。在有 Docker daemon 的发布机执行（下列变量需填真实值）：
+
+```bash
+RELEASE_TAG=<实际发布标签>
+GIT_REVISION=<完整40位Git提交SHA>
+# 仅拉取指定标签，不运行容器；拉取之前先确认 registry/revision 来源。
+docker compose --env-file deploy/.env.docker -f docker-compose.yml pull api web admin-web
+python deploy/scripts/check_release.py lock --version "$RELEASE_TAG" --revision "$GIT_REVISION" --output deploy/release.lock.yml --record deploy/release.record.json
+python deploy/scripts/check_release.py verify --output deploy/release.lock.yml --record deploy/release.record.json
+```
+
+锁定脚本对每个 tag 执行 `docker image inspect`，只从**该标签所属 repository** 的 `RepoDigests` 选择 digest；错误仓库、缺 digest、`latest`、分支标签、占位版本或 dirty 版本均拒绝。生成的 `release.lock.yml` 使用 JSON 语法（合法 YAML），只含三个服务的 digest 和 pull 策略。记录文件映射 `api/web/admin-web` 的原标签、image ID、RepoDigest、完整 revision 及可用的镜像 revision label，不复制镜像 env/secret。老 CI 没有 revision label 时，revision 是操作者从可信 CI 记录提供的声明，不能冒称已从镜像证明；发布前应核对构建记录。
+
+审查两个文件并保存至本次发布目录，备份数据库和媒体后，部署使用同一对文件：
+
+```bash
+python deploy/scripts/check_release.py verify --output deploy/release.lock.yml --record deploy/release.record.json
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml config --quiet
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
+```
+
+`verify` 是离线一致性检查，不替代 registry 来源可信性、签名或部署后运行镜像核对。不能在 `-f deploy/release.lock.yml` 后再追加改变 image 的 overlay。发布目录应连同 Git revision、数据库迁移版本、备份 manifest 和部署后实际 image IDs/digests 一起归档；回滚使用此前归档的 lock，不重新解析旧 tag。中间件仍固定小版本 tag，此应用 lock 不锁定 PostgreSQL/Redis；升级中间件应另行生成 digest 记录与恢复演练。
+
+### 本地源码构建
+
+先由 Git 自动生成版本和 dirty 状态，禁止手填 `latest`：
+
+```bash
+python deploy/scripts/check_release.py build-metadata --output deploy/build.env
+docker compose --env-file deploy/.env.docker --env-file deploy/build.env -f docker-compose.full.yml build
+docker compose --env-file deploy/.env.docker --env-file deploy/build.env -f docker-compose.full.yml up -d --no-build
+```
+
+`build.env` 只含 SHA 标签、完整 revision、dirty 布尔值。工作树有修改时标签追加 `dirty` 和 UTC 时间；三个 image 带 revision/dirty labels。脚本拒绝覆盖已有文件，重复构建时请选择新的输出路径并同步 `--env-file`。不要手动覆写生成变量。dirty 构建仅用于本地验证，不能生成生产锁。生产发布应从干净 checkout 在 CI 构建/推送三个 registry 仓库，再按上一节从实际 RepoDigests 生成锁；只构建未推送的本地镜像通常没有 RepoDigests，不能伪装为可跨机器部署的 digest 发布。
+
+静态检查可不接触实际 env 文件或 daemon：
+
+```bash
+PRINTFILM_VERSION=0123456789abcdef0123456789abcdef01234567 POSTGRES_PASSWORD=static-validation-only REDIS_PASSWORD=static-validation-only docker compose -f docker-compose.yml config --no-env-resolution --quiet
+python -m unittest discover -s deploy/scripts -p test_check_release.py
+```
+
+此静态检查不代表镜像存在或能够启动；没有真实 Docker daemon/registry 数据时，只能验证工具逻辑，不能声称已生成真实生产 lock。

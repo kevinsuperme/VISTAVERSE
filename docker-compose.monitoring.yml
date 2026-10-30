@@ -1,0 +1,38 @@
+# Optional overlay: same project/network as the application. No public ports.
+services:
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=30d", "--storage.tsdb.retention.size=2GB"]
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./deploy/monitoring/public-targets.json:/etc/prometheus/public-targets.json:ro
+      - printfilm_metrics:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: 512m
+    cpus: 0.5
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.26.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/blackbox/config.yml"]
+    volumes:
+      - ./deploy/monitoring/blackbox.yml:/etc/blackbox/config.yml:ro
+    mem_limit: 64m
+    cpus: 0.25
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.0
+    restart: unless-stopped
+    pid: host
+    command: ["--path.rootfs=/host", "--collector.textfile.directory=/textfile"]
+    volumes:
+      - /:/host:ro,rslave
+      - ${MONITOR_TEXTFILE_DIR:?set MONITOR_TEXTFILE_DIR to the host metrics directory}:/textfile:ro
+    mem_limit: 64m
+    cpus: 0.25
+
+volumes:
+  printfilm_metrics:

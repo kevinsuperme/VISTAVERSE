@@ -10,6 +10,10 @@ Thumbs.db
 *.log
 .tmp/
 .tmp/**
+# Generated build identity and deployment artifacts (archive with release evidence).
+deploy/build.env
+deploy/release.lock.yml
+deploy/release.record.json
 agent-tools/
 # IDE 粘贴截图默认落仓库根 images/；文档截图请放到 docs/images/
 /images/
@@ -82,3 +86,16 @@ frontend/dist/
 # JavaScript dependencies and build output for every workspace
 **/node_modules/
 **/dist/
+**/.cache/
+.tox/
+.nox/
+.hypothesis/
+*.tmp
+*.bak
+*.orig
+*.sqlite
+*.sqlite3
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*

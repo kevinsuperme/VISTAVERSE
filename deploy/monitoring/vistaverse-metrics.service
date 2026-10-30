@@ -1,0 +1,16 @@
+[Unit]
+Description=Read-only VISTAVERSE runtime metrics collector
+After=docker.service
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/vistaverse-monitoring.env
+ExecStart=/usr/bin/python3 /opt/vistaverse/current/deploy/scripts/collect_metrics.py --project ${COMPOSE_PROJECT} --backup-dir ${BACKUP_DIR} --output ${TEXTFILE_DIR}/vistaverse.prom
+TimeoutStartSec=45
+Nice=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vistaverse-monitoring

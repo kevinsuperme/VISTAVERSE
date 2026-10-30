@@ -31,7 +31,7 @@ services:
       - "127.0.0.1:${REDIS_PORT:-16379}:6379"
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env.prod}
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - ai_movie_redisdata:/data
     healthcheck:

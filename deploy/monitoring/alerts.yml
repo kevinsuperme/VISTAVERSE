@@ -1,0 +1,62 @@
+groups:
+  - name: vistaverse
+    rules:
+      - alert: VistaverseNotReady
+        expr: probe_success{job=~"api-readiness|public-readiness"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "API database, Redis or task runtime is not ready"
+      - alert: MonitoringTargetMissing
+        expr: up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Monitoring target is unavailable"
+      - alert: PublicTlsExpiring
+        expr: probe_ssl_earliest_cert_expiry{job="public-readiness"} - time() < 1209600
+        for: 5m
+        labels: {severity: warning}
+      - alert: HostDiskLow
+        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes < 0.20
+        for: 15m
+        labels: {severity: warning}
+      - alert: HostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.15
+        for: 10m
+        labels: {severity: warning}
+      - alert: HostCpuBusy
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.85
+        for: 15m
+        labels: {severity: warning}
+      - alert: RuntimeCollectorFailed
+        expr: vistaverse_collect_success == 0 or time() - vistaverse_collect_timestamp_seconds > 180 or absent(vistaverse_collect_timestamp_seconds)
+        for: 2m
+        labels: {severity: critical}
+      - alert: ContainerUnavailable
+        expr: vistaverse_container_running == 0 or vistaverse_container_healthy == 0
+        for: 1m
+        labels: {severity: critical}
+      - alert: ContainerRestarted
+        expr: delta(vistaverse_container_restarts_total[10m]) > 0
+        labels: {severity: warning}
+      - alert: RedisMemoryHigh
+        expr: vistaverse_redis_used_memory_bytes / vistaverse_redis_maxmemory_bytes > 0.80
+        for: 5m
+        labels: {severity: warning}
+      - alert: RedisPersistenceUnhealthy
+        expr: vistaverse_redis_aof_healthy == 0 or increase(vistaverse_redis_evicted_keys_total[5m]) > 0
+        for: 1m
+        labels: {severity: critical}
+      - alert: OssQueueBacklog
+        expr: vistaverse_oss_pending > 800 or vistaverse_oss_quarantined > 0
+        for: 5m
+        labels: {severity: warning}
+      - alert: BackupStale
+        expr: time() - vistaverse_backup_timestamp_seconds > 86400
+        for: 15m
+        labels: {severity: critical}
+      - alert: RestoreDrillStale
+        expr: time() - vistaverse_restore_timestamp_seconds > 2592000
+        for: 15m
+        labels: {severity: warning}

@@ -131,10 +131,14 @@ def test_avatar_upload_reads_in_bounded_chunks() -> None:
 
 
 def test_project_cover_upload_reads_in_bounded_chunks() -> None:
+    from app.services.avatar_upload import receive_image_upload
     source = inspect.getsource(projects_api.upload_project_cover)
-    assert "while True" in source
-    assert "1024 * 1024" in source
-    assert "封面不能超过 8MB" in source
+    assert "receive_image_upload" in source
+    assert "8 * 1024 * 1024" in source
+    shared_source = inspect.getsource(receive_image_upload)
+    assert "while True" in shared_source
+    assert "64 * 1024" in shared_source
+    assert "total > max_bytes" in shared_source
 
 
 def test_seedance_content_is_bounded_and_media_urls_are_checked() -> None:

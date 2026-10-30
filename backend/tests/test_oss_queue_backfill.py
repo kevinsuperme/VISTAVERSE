@@ -28,11 +28,12 @@ def test_collect_local_urls_from_params():
         {
             "voiceAudio": "/static/a.mp3",
             "canvas": {"voiceAudio": "https://cdn.example/b.mp3"},
+            "urls": ["/static/generated/tools/u1/output.png"],
             "note": "/static/not-a-media-key.txt",
         },
         found,
     )
-    assert found == {"/static/a.mp3"}
+    assert found == {"/static/a.mp3", "/static/generated/tools/u1/output.png"}
 
 
 def test_upload_local_url_sync_accepts_oss_https_even_if_local_file_exists(tmp_path, monkeypatch):
@@ -52,7 +53,11 @@ def test_upload_local_url_sync_accepts_oss_https_even_if_local_file_exists(tmp_p
     monkeypatch.setattr(storage_mod, "STATIC_ROOT", tmp_path)
     monkeypatch.setattr(storage_mod, "is_local_static_url", lambda url: str(url or "").startswith("/static/"))
     monkeypatch.setattr(storage_mod, "local_path_from_url", lambda url: local if url == local_url else None)
-    monkeypatch.setattr(storage_mod, "upload_local_sync", lambda path: oss_https)
+    def upload(path, *, canonical=False):
+        assert canonical is True  # Durable DB references must not expire.
+        return oss_https
+
+    monkeypatch.setattr(storage_mod, "upload_local_sync", upload)
 
     with patch.object(oss_queue.oss_svc, "oss_enabled", return_value=True):
         out = oss_queue.upload_local_url_sync(local_url)

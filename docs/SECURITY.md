@@ -8,7 +8,7 @@
 - 开发环境不配置密钥时只生成一次性随机密钥，重启会使本地会话失效。生产环境不会自动生成密钥。
 - 开发诊断接口刷新配置时复用当前进程的一次性密钥，不会因为读取健康详情而主动注销现有会话。
 - 生产环境默认关闭 FastAPI `/docs`、`/redoc` 和 `/openapi.json`。需要开放接口文档时，应在受控的内网或已认证反向代理后单独开放。
-- 公共 `/api/health` 只返回存活状态；数据库连接池、任务运行时、媒体磁盘、模型名和请求统计位于需要管理员身份的 `/api/health/details`。
+- 公共 `/api/health` 只返回存活状态，`/api/ready` 以 200/503 表示数据库、Redis 和任务运行时就绪；数据库连接池、任务运行时、媒体磁盘、模型名和请求统计位于需要管理员身份的 `/api/health/details`。
 - 每个 HTTP 响应带 `X-Request-ID`。客户端提供的值仅在可打印 ASCII、长度不超过 64 时复用，否则生成随机值；该值用于日志关联，不是鉴权凭据。
 - 上传在写盘前校验工具、文件数量、单文件大小和总大小，采用分块写入与临时文件原子替换；异常不会把内部堆栈返回客户端。
 - 媒体本地路径会解析后校验仍位于 `backend/static` 下；远程媒体下载只接受 HTTPS，并拒绝回环、私网、链路本地、保留地址和云元数据主机名。
@@ -29,7 +29,7 @@
 2. 生产设置 `ENVIRONMENT=production`、随机 `SECRET_KEY`、真实 `POSTGRES_PASSWORD` 和 `REDIS_PASSWORD`。不要把 `.env`、密钥、OSS 密钥或支付密钥加入版本库。
 3. 通过反向代理提供 HTTPS；`CORS_ORIGINS` 只保留实际前端来源。不要把 `allow_origins=*` 与带凭据的跨域请求一起使用。
 4. 定期备份 `printfilm_pgdata` 和 `printfilm_media`，并演练恢复。Redis 只保存队列/进度，不能替代数据库备份。
-5. 生产发布后先访问 `/api/health`，再用管理员令牌访问 `/api/health/details`，核对数据库池、任务运行时和请求错误计数。
+5. 生产发布后先访问 `/api/health` 和 `/api/ready`，再用管理员令牌访问 `/api/health/details`，核对数据库池、任务运行时和请求错误计数。
 
 ## 当前边界与剩余风险
 
@@ -38,9 +38,9 @@
 - 普通项目与漫剧项目仍使用 `generated/p{id}` 共享目录；当前同 ID 且不同 owner 时拒绝签发，长期应迁移到带 domain/UUID 的目录并迁移旧媒体。
 - JWT 目前只含 `sub/exp`，改密或重置密码后旧令牌在到期前仍有效；如需立即撤销，应增加 `token_version` 或密码变更时间校验。
 - 生成 API、工具 API 和漫剧生成仍需在网关或 Redis 层补充按用户/API key/IP 的分布式限流与每日额度；当前登录相关限流不覆盖所有上游消耗入口。
-- 启动迁移仍由 `backend/app/main.py` 的版本检查和补丁执行，当前版本为 1；新增补丁必须 bump 版本。旧任务列清理和时间列类型统一应迁移到可审计的版本化 migration，禁止把启动 DDL 当作长期迁移系统。
+- 启动迁移仍由 `backend/app/main.py` 的版本检查和补丁执行，当前版本为 2；新增补丁必须 bump 版本。旧任务列清理和时间列类型统一应迁移到可审计的版本化 migration，禁止把启动 DDL 当作长期迁移系统。
 - 外部 HTTPS URL 的解析校验与后续 HTTP 连接之间仍存在 DNS rebinding 窗口；高安全部署应通过固定解析的 HTTP 客户端或 egress proxy 收敛。
-- OSS 是否允许 `public-read` 取决于产品媒体公开策略；若媒体应按租户私有，必须使用私有 bucket 与短期签名，并开启 `MEDIA_REQUIRE_SIGNATURE`。
+- 新上传 OSS 对象显式使用 `private` ACL；签名失败会报错而不回退公开 URL。已有 `public-read` 对象及 bucket policy 不会被本次代码修改自动收紧：上线前需盘点旧 ACL，在授权和回滚方案下单独迁移，并验证无签名访问 403、有效签名 200、过期签名 403。静态站点发布如复用此上传器，需要改为受控 CDN/origin 策略，不能依赖旧 public-read 行为。
 - 前端 JWT 仍保存在 `localStorage`，Nginx 默认未统一下发 CSP、`X-Frame-Options`、`nosniff` 和 `Referrer-Policy`；公网部署前应迁移 HttpOnly cookie 或严格 CSP，并补齐响应头。
 - `ark.py`、`studio_tools.py` 和漫剧参考音频流程仍有未统一超时的 FFmpeg 子进程；需统一进程组终止和资源上限，避免单 worker 被外部媒体拖住。
 - 实际用量高于预扣估算时结算路径可能出现余额透支；应定义欠费状态或额度上限，而不是允许钱包余额变负。
@@ -51,3 +51,13 @@
 ## 事件排查
 
 使用响应头中的 `X-Request-ID` 搜索 API 日志；任务故障使用 `TaskRun.id`、`provider_task_id` 和对应的 `UsageEvent.task_run_id` 关联。不要在日志、工单或截图中粘贴 Authorization、API Key、支付签名或完整远程 URL 查询参数。
+
+## 本轮收紧的边界
+
+头像不再相信文件名或 MIME：分块接收、5 MiB 输入上限、真实图片解码与 16M 像素/8192 边长限制，再生成最多 1024 像素 PNG，清除原始元数据、动画和尾随内容；解码与文件发布在工作线程执行。旧头像文件不会自动删除，需要按引用关系和保留周期单独清理。
+
+应用日志在最终格式化后统一脱敏 URL（包括异常堆栈）、查询串和邮箱；Uvicorn access/error handler 同样接入。仓库 Nginx access log 仅记录路径，不写 `$request`/`$args`；宿主机额外反向代理、第三方 APM、SDK 自建 handler 和旧日志仍需单独核查，不能视为自动追溯清理。Nginx 明确拒绝 dotfile（保留 `.well-known`）、数据库备份、私钥及开发配置路径，避免 SPA fallback 将探测伪装为 200。
+
+生产验收和备份恢复报告要求见 [PRODUCTION_VERIFICATION.md](PRODUCTION_VERIFICATION.md)；所有真实上游调用、对象 ACL 修改、备份生成与隔离恢复都必须按实际环境授权执行，文档不宣称已完成演练。
+
+项目封面、分镜、工具及漫剧图片执行真实解码与 PNG 重编码，保留原图尺寸但限制 16M 像素/8192 边长；漫剧音频和工具视频通过最多 15 秒的本地 `ffprobe` 校验实际容器、轨道和时长（最长 1 小时）。工具视频允许音轨，拒绝附件、字幕和数据流。协议仅允许 file/pipe，校验失败清理临时文件。媒体结构校验不是恶意软件扫描；线上 FFmpeg/ffprobe 可用性仍须在构建后验证。

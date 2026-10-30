@@ -124,11 +124,13 @@ development 配置，避免无计费调用上游模型。
 
 ### 2. 一键启动
 
+启动前先按 [不可变发布流程](deploy/README.md#immutable-releases) 从实际镜像生成并审查 `deploy/release.lock.yml` 和 `deploy/release.record.json`；禁止使用占位 tag 或 `latest`。
+
 ```bash
-docker compose --env-file deploy/.env.docker up -d
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 ```
 
-镜像版本通过 `PRINTFILM_VERSION` 固定（默认 `0.2.0`）。升级前请备份数据库和媒体卷，迁移、健康检查和回滚流程见 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
+镜像标签 `PRINTFILM_VERSION` 必填且无默认值；生产必须同时使用经校验的 digest lock，具体流程见 [deploy/README.md](deploy/README.md#immutable-releases)。升级前请备份数据库和媒体卷，迁移、健康检查和回滚流程见 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
 
 等约半分钟（API 健康检查通过后，web / admin 才会起来）。
 
@@ -152,15 +154,15 @@ docker compose --env-file deploy/.env.docker down        # 停止（保留数据
 | 角色 | 怎么拿 |
 |------|--------|
 | 普通用户 | 打开用户端 → `/auth` 邮箱注册 |
-| 管理员 | 先用该邮箱注册 → 在 `.env.docker` 设 `ADMIN_BOOTSTRAP_EMAILS=你的邮箱` → `docker compose --env-file deploy/.env.docker up -d --force-recreate api`（**只提权，不造号**） |
+| 管理员 | 先用该邮箱注册 → 在 `.env.docker` 设 `ADMIN_BOOTSTRAP_EMAILS=你的邮箱` → `docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build --force-recreate api`（**只提权，不造号**） |
 
 仓库无内置演示账号；生产请立刻改掉密钥。
 
-### 4. 更新到最新镜像
+### 4. 更新到已锁定的发布镜像
 
 ```bash
-docker compose --env-file deploy/.env.docker pull
-docker compose --env-file deploy/.env.docker up -d
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml pull
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 ```
 
 ### 5. 从源码构建（可选）
@@ -168,7 +170,8 @@ docker compose --env-file deploy/.env.docker up -d
 改过前后端代码，或拉不到 ACR 时：
 
 ```bash
-docker compose --env-file deploy/.env.docker -f docker-compose.full.yml up -d --build
+python deploy/scripts/check_release.py build-metadata --output deploy/build.env
+docker compose --env-file deploy/.env.docker --env-file deploy/build.env -f docker-compose.full.yml up -d --build
 ```
 
 如果只需要调试后端源码，或本机暂时无法下载完整 API 镜像依赖，可只启动
@@ -177,7 +180,7 @@ PostgreSQL / Redis，再在宿主机运行 API：详见
 [docs/OPERATIONS.md](docs/OPERATIONS.md) 的“Windows 本机 Docker 调试基线”。
 该模式仍会执行真实数据库迁移、Redis 连接和生产媒体签名校验；它不会把
 `docker-compose.full.yml` 的镜像构建结果误当成已完成的全栈容器验证。
-如果已构建 `printfilm-web:latest` / `printfilm-admin-web:latest`，还可以按
+如果已构建 `printfilm-web:${PRINTFILM_VERSION}` / `printfilm-admin-web:${PRINTFILM_VERSION}`，还可以按
 [deploy/README.md](deploy/README.md) 的说明把两个静态站点放进 Docker，使用
 `api:host-gateway` 反代到宿主机 API。
 
@@ -212,7 +215,7 @@ MODEL_VIDEO=seedance-2-5
 `OPENAI_API_KEY` 与 `ARK_API_KEY` 填**同一把**即可。然后重建 API 容器使环境生效：
 
 ```bash
-docker compose --env-file deploy/.env.docker up -d --force-recreate api
+docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build --force-recreate api
 ```
 
 打开 http://localhost:8000/api/health 验证存活；模型和任务运行时详情需管理员令牌访问 `/api/health/details`。生产环境默认关闭 `/docs`、`/redoc` 和 `/openapi.json`。

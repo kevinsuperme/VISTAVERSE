@@ -348,9 +348,14 @@ def protect_media_url(url: str) -> str:
     Paths outside ``static/generated`` (templates, mock assets and SPA files)
     remain public. Existing OSS URLs are left untouched.
     """
-    if not url or not bool(getattr(get_settings(), "media_require_signature", False)):
+    if not url:
         return url
     from app.services import media_access
+    # Private OSS objects require signing even when local signature mode is off.
+    if media_access.oss_object_key(url) is not None:
+        return media_access.signed_media_url(url)
+    if not bool(getattr(get_settings(), "media_require_signature", False)):
+        return url
 
     parsed = urlsplit(url)
     if parsed.path.startswith("/api/media/"):
@@ -465,7 +470,7 @@ def is_kepu_final_media(path: Path) -> bool:
     return Path(path).name.lower() in _KEPU_FINAL_NAMES
 
 
-def upload_local_sync(path: Path, *, retries: int = 2) -> str:
+def upload_local_sync(path: Path, *, retries: int = 2, canonical: bool = False) -> str:
     """Upload file to OSS synchronously; raises if OSS disabled or all retries fail."""
     path = Path(path)
     if not path.is_file():
@@ -477,7 +482,8 @@ def upload_local_sync(path: Path, *, retries: int = 2) -> str:
     last_err: Exception | None = None
     for attempt in range(max(1, retries)):
         try:
-            return oss_svc.upload_file(path)
+            uploaded = oss_svc.upload_file(path)
+            return uploaded if canonical else protect_media_url(uploaded)
         except Exception as exc:  # noqa: BLE001
             last_err = exc
             logger.warning(
@@ -527,7 +533,8 @@ def publish_local(path: Path, *, sync: bool = False, retries: int = 2) -> str:
             enqueue_oss_upload(local_url)
             return local_url
         except Exception:  # noqa: BLE001
-            logger.exception("OSS enqueue failed for %s, falling back to sync upload", path)
+            logger.warning("OSS queue unavailable; retaining local media for reconciliation")
+            return local_url
 
     try:
         return upload_local_sync(path, retries=retries)
@@ -540,6 +547,9 @@ def republish_url(url: str | None, *, sync: bool = True) -> str | None:
     """If url is a local /static path and file exists, upload to OSS and return new URL."""
     if not url:
         return url
+    from app.services import media_access
+    if media_access.oss_object_key(url) is not None:
+        return media_access.signed_media_url(url)
     if not is_local_static_url(url):
         return url
     from app.services import oss as oss_svc

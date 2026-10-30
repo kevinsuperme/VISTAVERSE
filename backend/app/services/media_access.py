@@ -168,30 +168,40 @@ def verify_media_signature(path: str, expires: int, signature: str) -> bool:
         return False
 
 
-def signed_media_url(value: str, *, expires: int | None = None) -> str | None:
-    """Convert a generated local URL to a short-lived API URL.
+def oss_object_key(value: str) -> str | None:
+    """Recognize only this configured OSS origin and preserve its object prefix."""
+    from app.services import oss
 
-    Non-local/OSS URLs are returned unchanged so existing public OSS delivery
-    keeps working; callers that need private OSS should use its OSS signer.
-    """
+    parsed = urlsplit(str(value or ""))
+    if not parsed.netloc or not oss.oss_enabled():
+        return None
+    configured = str(getattr(get_settings(), "oss_public_base", "") or "").strip()
+    base = urlsplit(configured or oss.public_base())
+    if parsed.netloc.lower().rstrip(".") != base.netloc.lower().rstrip("."):
+        return None
+    prefix = base.path.rstrip("/") + "/"
+    if not parsed.path.startswith(prefix):
+        return None
+    key = unquote(parsed.path[len(prefix):])
+    if not key or any(part in {".", ".."} for part in key.split("/")) or "\\" in key or "\x00" in key:
+        raise ValueError("OSS object path invalid")
+    return key
+
+
+def signed_media_url(value: str, *, expires: int | None = None) -> str | None:
+    """Refresh OSS capabilities or issue a local generated-media capability."""
+    object_key = oss_object_key(value)
+    if object_key is not None:
+        from app.services import oss
+        ttl = _ttl() if expires is None else int(expires) - int(time.time())
+        if ttl <= 0:
+            raise ValueError("媒体签名过期时间无效")
+        # Propagate signing failure: no raw or expired URL fallback.
+        return oss.signed_public_url(object_key, expires=ttl)
     key = media_path_from_url(value)
     if not key:
         return None
     _, exp, signature = sign_media_path(key, expires=expires)
-    parsed = urlsplit(str(value or "").strip())
-    if parsed.netloc:
-        try:
-            from app.services import oss
-
-            configured_oss_base = str(getattr(get_settings(), "oss_public_base", "") or "").strip()
-            oss_base = configured_oss_base or oss.public_base()
-            oss_netloc = urlsplit(oss_base).netloc.lower().rstrip(".")
-            if parsed.netloc.lower().rstrip(".") == oss_netloc and oss.oss_enabled():
-                base_path = urlsplit(oss_base).path.rstrip("/")
-                object_key = parsed.path.removeprefix(f"{base_path}/").lstrip("/")
-                return oss.signed_public_url(object_key, expires=exp - int(time.time()))
-        except Exception:  # noqa: BLE001
-            return None
     base = str(getattr(get_settings(), "public_base_url", "") or "").rstrip("/")
     route = f"/api/media/{quote(key, safe='/')}"
     query = f"?expires={exp}&signature={quote(signature)}"

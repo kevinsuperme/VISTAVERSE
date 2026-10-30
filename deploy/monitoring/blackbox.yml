@@ -1,0 +1,16 @@
+modules:
+  http_json_ok:
+    prober: http
+    timeout: 4s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      follow_redirects: false
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp:
+        - '"ok"\s*:\s*true'
+      fail_if_header_not_matches:
+        - header: Content-Type
+          regexp: 'application/json'
+      tls_config:
+        insecure_skip_verify: false

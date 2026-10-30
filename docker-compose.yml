@@ -1,7 +1,8 @@
 # PRINTFILM 全栈（GitHub / 自托管）：拉取公开 ACR 镜像，无需本地构建
 # gcc 命名空间公开，docker pull 不用登录
 # 启动：cp deploy/.env.docker.example deploy/.env.docker
-#       docker compose --env-file deploy/.env.docker up -d
+#       Generate and verify deploy/release.lock.yml using deploy/scripts/check_release.py first.
+#       docker compose --env-file deploy/.env.docker -f docker-compose.yml -f deploy/release.lock.yml up -d --no-build
 name: printfilm
 
 services:
@@ -25,7 +26,7 @@ services:
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env.docker}
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - printfilm_redisdata:/data
     healthcheck:
@@ -35,7 +36,7 @@ services:
       retries: 20
 
   api:
-    image: gcc-registry.cn-hangzhou.cr.aliyuncs.com/gcc/printfilm-api:${PRINTFILM_VERSION:-0.2.0}
+    image: gcc-registry.cn-hangzhou.cr.aliyuncs.com/gcc/printfilm-api:${PRINTFILM_VERSION:?set PRINTFILM_VERSION to a unique release tag}
     restart: unless-stopped
     env_file:
       - deploy/.env.docker
@@ -56,7 +57,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=4)",
         ]
       interval: 15s
       timeout: 5s
@@ -66,7 +67,7 @@ services:
       - "127.0.0.1:${API_PORT:-8000}:8000"
 
   web:
-    image: gcc-registry.cn-hangzhou.cr.aliyuncs.com/gcc/printfilm-web:${PRINTFILM_VERSION:-0.2.0}
+    image: gcc-registry.cn-hangzhou.cr.aliyuncs.com/gcc/printfilm-web:${PRINTFILM_VERSION:?set PRINTFILM_VERSION to a unique release tag}
     restart: unless-stopped
     depends_on:
       api:
@@ -75,7 +76,7 @@ services:
       - "127.0.0.1:${WEB_PORT:-8080}:80"
 
   admin-web:
-    image: gcc-registry.cn-hangzhou.cr.aliyuncs.com/gcc/printfilm-admin-web:${PRINTFILM_VERSION:-0.2.0}
+    image: gcc-registry.cn-hangzhou.cr.aliyuncs.com/gcc/printfilm-admin-web:${PRINTFILM_VERSION:?set PRINTFILM_VERSION to a unique release tag}
     restart: unless-stopped
     depends_on:
       api:

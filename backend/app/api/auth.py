@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pathlib import Path
+import asyncio
+from tempfile import SpooledTemporaryFile
+from app.services.avatar_upload import normalize_avatar
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -173,40 +175,28 @@ async def upload_avatar(
     user: User = Depends(get_current_user),
 ) -> User:
     """Upload or replace the current user's profile avatar."""
-    content_type = (file.content_type or "").lower()
-    allowed = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-    }
-    ext = allowed.get(content_type)
-    if not ext:
-        suffix = Path(file.filename or "").suffix.lower()
-        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-            ext = ".jpg" if suffix == ".jpeg" else suffix
-        else:
-            raise HTTPException(status_code=400, detail="仅支持 JPG / PNG / WebP / GIF")
-
     max_bytes = 5 * 1024 * 1024
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(min(1024 * 1024, max_bytes + 1 - total))
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(status_code=400, detail="头像不能超过 5MB")
-    raw = b"".join(chunks)
-    if not raw:
-        raise HTTPException(status_code=400, detail="空文件")
-
-    dest = storage.user_dir(user.id) / f"avatar{ext}"
-    dest.write_bytes(raw)
-    user.avatar_url = storage.publish_local(dest)
+    # Spool to disk after 1 MiB; the original upload is never served.
+    with SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b") as source:
+        total = 0
+        try:
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(status_code=400, detail="头像不能超过 5MB")
+                await asyncio.to_thread(source.write, chunk)
+            if not total:
+                raise HTTPException(status_code=400, detail="空文件")
+            source.seek(0)
+            dest = await asyncio.to_thread(normalize_avatar, source, storage.user_dir(user.id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            await file.close()
+    user.avatar_url = await asyncio.to_thread(storage.publish_local, dest)
     await db.commit()
     await db.refresh(user)
     return user
